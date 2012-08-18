@@ -3,54 +3,42 @@
 
 #include<windows.h>
 #include<psapi.h>
-#include<tlhelp32.h>
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
 
 #include"judge.h"
 
-int Crash_Clean(){
-    HANDLE hSnap;
-    PROCESSENTRY32 entry;
-    HANDLE hProc;
-
-    hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
-    entry.dwSize = sizeof(PROCESSENTRY32);
-    Process32First(hSnap,&entry);
-    do{
-	if(wcscmp(entry.szExeFile,L"WerFault.exe") == 0){
-	    hProc = OpenProcess(PROCESS_TERMINATE,FALSE,entry.th32ProcessID);
-	    TerminateProcess(hProc,0);
-	    CloseHandle(hProc);
-	}
-    }while(Process32Next(hSnap,&entry));
-
-    return 0;
-}
-
 typedef HANDLE WINAPI (*FUNC_CreateJobObject)(LPSECURITY_ATTRIBUTES lpJobAttributes,LPCTSTR lpName);
 typedef BOOL WINAPI (*FUNC_SetInformationJobObject)(HANDLE hJob,JOBOBJECTINFOCLASS JobObjectInfoClass,LPVOID lpJobObjectInfo,DWORD cbJobObjectInfoLength);
 typedef BOOL WINAPI (*FUNC_AssignProcessToJobObject)(HANDLE hJob,HANDLE hProcess);
-typedef BOOL WINAPI (*FUNC_DebugActiveProcessStop)(DWORD dwProcessId);
+typedef BOOL WINAPI (*FUNC_ConvertStringSidToSid)(LPCTSTR StringSid,PSID *Sid);
+
+#define TokenIntegrityLevel (TOKEN_INFORMATION_CLASS)25
+typedef struct _TOKEN_MANDATORY_LABEL{
+    SID_AND_ATTRIBUTES Label;
+}TOKEN_MANDATORY_LABEL,*PTOKEN_MANDATORY_LABEL;
+
 
 int Protect(HANDLE hProc,ULONG memlimit){
     HMODULE hKernel32;
     FUNC_CreateJobObject CreateJobObject;
     FUNC_SetInformationJobObject SetInformationJobObject;
     FUNC_AssignProcessToJobObject AssignProcessToJobObject;
-    FUNC_DebugActiveProcessStop DebugActiveProcessStop;
+    FUNC_ConvertStringSidToSid ConvertStringSidToSid;
 
     HANDLE hJob;
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION JELI;
     JOBOBJECT_BASIC_UI_RESTRICTIONS JBUR;
+    PSID pSID;
+    TOKEN_MANDATORY_LABEL TML;
     HANDLE hToken;
-    
+
     hKernel32 = GetModuleHandle(L"kernel32.dll");
-    CreateJobObject = (FUNC_CreateJobObject)GetProcAddress(hKernel32,"CreateJobObjectA");
+    CreateJobObject = (FUNC_CreateJobObject)GetProcAddress(hKernel32,"CreateJobObjectW");
     SetInformationJobObject = (FUNC_SetInformationJobObject)GetProcAddress(hKernel32,"SetInformationJobObject");
     AssignProcessToJobObject = (FUNC_AssignProcessToJobObject)GetProcAddress(hKernel32,"AssignProcessToJobObject");
-    DebugActiveProcessStop = (FUNC_DebugActiveProcessStop)GetProcAddress(hKernel32,"DebugActiveProcessStop");
+    ConvertStringSidToSid = (FUNC_ConvertStringSidToSid)GetProcAddress(GetModuleHandle(L"advapi32.dll"),"ConvertStringSidToSidW");
 
     hJob = CreateJobObject(NULL,NULL);
 
@@ -73,10 +61,25 @@ int Protect(HANDLE hProc,ULONG memlimit){
     OpenProcessToken(hProc,TOKEN_ALL_ACCESS,&hToken);
     AdjustTokenPrivileges(hToken,TRUE,NULL,0,NULL,NULL);
 
+    ConvertStringSidToSid(L"S-1-16-0",&pSID);
+    TML.Label.Sid = pSID;
+    TML.Label.Attributes = SE_GROUP_INTEGRITY;
+    SetTokenInformation(hToken,TokenIntegrityLevel,&TML,sizeof(TOKEN_MANDATORY_LABEL) + GetLengthSid(pSID));
+
+    LocalFree(pSID);
+    CloseHandle(hToken);
+
     return 0;
 }
 
-PJUDGE_INFO pJudgeInfo;
+typedef struct{
+    ULONG timestart;
+    ULONG timeend;
+    ULONG timelimit;
+    ULONG memlimit;
+    ULONG state;
+}JUDGE_INFO,*PJUDGE_INFO;
+JUDGE_INFO judgeInfo;
 
 HANDLE hAnsFile;
 HANDLE hInPipe;
@@ -126,17 +129,14 @@ DWORD WINAPI IoThread(LPVOID lpParameter){
 	overFlag = true;
     }
 
-    if(overFlag == true && pJudgeInfo->state <= JUDGE_STATE_AC){
-	pJudgeInfo->state = JUDGE_STATE_WA;
+    if(overFlag == true && judgeInfo.state <= JUDGE_STATE_AC){
+	judgeInfo.state = JUDGE_STATE_WA;
     }
 
     return 0;
 }
 
 int main(int argc,char *args[]){
-    ULONG timelimit;
-    ULONG memlimit;
-
     SECURITY_ATTRIBUTES sa;
     HANDLE hFile;
     HANDLE hOutPipe;
@@ -151,7 +151,9 @@ int main(int argc,char *args[]){
     HANDLE hComEvent;
     WCHAR ComMapName[128];
     HANDLE hComMap;
+    PULONG pDllState;
 
+    int timeoutCount;
     PROCESS_MEMORY_COUNTERS memInfo;
 
     if(argc != 6){
@@ -159,8 +161,8 @@ int main(int argc,char *args[]){
 	return 0;
     }
 
-    timelimit = atoi(args[2]);
-    memlimit = atoi(args[3]) * 1024;
+    judgeInfo.timelimit = atoi(args[2]);
+    judgeInfo.memlimit = atoi(args[3]) * 1024;
 
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.lpSecurityDescriptor = NULL;
@@ -206,11 +208,11 @@ int main(int argc,char *args[]){
     hComEvent = CreateEvent(NULL,FALSE,FALSE,ComEventName);
     wsprintf(ComMapName,L"JUDGE_COMMAP_%u",procInfo.dwProcessId);
     hComMap = CreateFileMapping(NULL,NULL,PAGE_READWRITE,0,sizeof(JUDGE_INFO),ComMapName);
-    pJudgeInfo = (PJUDGE_INFO)MapViewOfFile(hComMap,FILE_MAP_ALL_ACCESS,0,0,sizeof(JUDGE_INFO));
+    pDllState = (PULONG)MapViewOfFile(hComMap,FILE_MAP_ALL_ACCESS,0,0,sizeof(ULONG));
 
-    pJudgeInfo->timestart = 0;
-    pJudgeInfo->timelimit = timelimit;
-    pJudgeInfo->state = JUDGE_STATE_RUN;
+    judgeInfo.timestart = 0;
+    judgeInfo.state = JUDGE_STATE_AC;
+    *pDllState = JUDGE_STATE_RUN;
 
     rDllName = VirtualAllocEx(procInfo.hProcess,NULL,strlen(DLL_NAME) + 1,MEM_COMMIT | MEM_RESERVE,PAGE_READWRITE);
     WriteProcessMemory(procInfo.hProcess,rDllName,DLL_NAME,strlen(DLL_NAME) + 1,NULL);
@@ -222,55 +224,62 @@ int main(int argc,char *args[]){
 	    0,
 	    NULL);
 
-    WaitForSingleObject(hComEvent,INFINITE);
-
     hIoThread = CreateThread(NULL,0,IoThread,NULL,0,NULL);
-    Protect(procInfo.hProcess,memlimit);
-    pJudgeInfo->timestart = GetTickCount();
-    
+    WaitForSingleObject(hComEvent,INFINITE);
+    Protect(procInfo.hProcess,judgeInfo.memlimit);
+    judgeInfo.timestart = GetTickCount();
+
     ResumeThread(procInfo.hThread);
 
+    timeoutCount = 0;
     while(true){
-	if(WaitForSingleObject(hComEvent,1200) == WAIT_TIMEOUT){ 
-	    break;
-	}else if(pJudgeInfo->state != JUDGE_STATE_RUN){
-	    break;
+	if(WaitForSingleObject(hComEvent,200) == WAIT_TIMEOUT){ 
+	    timeoutCount++;
+	    if(timeoutCount >= 6){
+		judgeInfo.state = JUDGE_STATE_RE;
+		break;
+	    }
+	}else{
+	    timeoutCount = 0;
+	    if((GetTickCount() - judgeInfo.timestart) > judgeInfo.timelimit){
+		judgeInfo.state = JUDGE_STATE_TLE;
+		break;
+	    }else if(*pDllState != JUDGE_STATE_RUN){
+		if(*pDllState != JUDGE_STATE_AC){
+		    judgeInfo.state = *pDllState;
+		}
+		break;
+	    }
 	}
     }
 
-    if(pJudgeInfo->state == JUDGE_STATE_RUN){
-	pJudgeInfo->timeend = GetTickCount();
-	pJudgeInfo->state = JUDGE_STATE_RE;
-	TerminateProcess(procInfo.hProcess,0);
-    }
+    judgeInfo.timeend = GetTickCount();
+    TerminateProcess(procInfo.hProcess,0);
     CloseHandle(hOutPipe);
-    Crash_Clean();
+    WaitForSingleObject(hIoThread,INFINITE);
 
-    printf("Time: %lums\n",pJudgeInfo->timeend - pJudgeInfo->timestart);
+    printf("Time: %lums\n",judgeInfo.timeend - judgeInfo.timestart);
 
     GetProcessMemoryInfo(procInfo.hProcess,&memInfo,sizeof(PROCESS_MEMORY_COUNTERS));
     printf("Memory: %dKB\n",(memInfo.PeakPagefileUsage / 1024));
 
-    if(memInfo.PeakPagefileUsage > memlimit){
-	pJudgeInfo->state = JUDGE_STATE_MLE;
+    if(memInfo.PeakPagefileUsage >= judgeInfo.memlimit){
+	judgeInfo.state = JUDGE_STATE_MLE;
     }
 
-    WaitForSingleObject(hIoThread,INFINITE);
-
-    if(pJudgeInfo->state == JUDGE_STATE_AC){
+    if(judgeInfo.state == JUDGE_STATE_AC){
 	printf("Status: AC\n");
-    }else if(pJudgeInfo->state == JUDGE_STATE_WA){
+    }else if(judgeInfo.state == JUDGE_STATE_WA){
 	printf("Status: WA\n");
-    }else if(pJudgeInfo->state == JUDGE_STATE_TLE){
+    }else if(judgeInfo.state == JUDGE_STATE_TLE){
 	printf("Status: TLE\n");
-    }else if(pJudgeInfo->state == JUDGE_STATE_RF){
+    }else if(judgeInfo.state == JUDGE_STATE_RF){
 	printf("Status: RF\n");
-    }else if(pJudgeInfo->state == JUDGE_STATE_RE){
+    }else if(judgeInfo.state == JUDGE_STATE_RE){
 	printf("Status: RE\n");
-    }else if(pJudgeInfo->state == JUDGE_STATE_MLE){
+    }else if(judgeInfo.state == JUDGE_STATE_MLE){
 	printf("Status: MLE\n");
     }
 
     return 0;
-
 }

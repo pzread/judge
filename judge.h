@@ -5,10 +5,3 @@
 #define JUDGE_STATE_RF 0x4
 #define JUDGE_STATE_RE 0x5
 #define JUDGE_STATE_MLE 0x6
-
-typedef struct{
-    ULONG timestart;
-    ULONG timeend;
-    ULONG timelimit;
-    int state;
-}JUDGE_INFO,*PJUDGE_INFO;
