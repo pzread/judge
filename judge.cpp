@@ -13,32 +13,33 @@ typedef HANDLE WINAPI (*FUNC_CreateJobObject)(LPSECURITY_ATTRIBUTES lpJobAttribu
 typedef BOOL WINAPI (*FUNC_SetInformationJobObject)(HANDLE hJob,JOBOBJECTINFOCLASS JobObjectInfoClass,LPVOID lpJobObjectInfo,DWORD cbJobObjectInfoLength);
 typedef BOOL WINAPI (*FUNC_AssignProcessToJobObject)(HANDLE hJob,HANDLE hProcess);
 typedef BOOL WINAPI (*FUNC_ConvertStringSidToSid)(LPCTSTR StringSid,PSID *Sid);
+typedef BOOL WINAPI (*FUNC_ConvertSidToStringSid)(PSID Sid,LPTSTR *StringSid);
+typedef BOOL WINAPI (*FUNC_CreateRestrictedToken)(HANDLE ExistingTokenHandle,DWORD Flags,DWORD DisableSidCount,PSID_AND_ATTRIBUTES SidsToDisable,DWORD DeletePrivilegeCount,PLUID_AND_ATTRIBUTES PrivilegesToDelete,DWORD RestrictedSidCount,PSID_AND_ATTRIBUTES SidsToRestrict,PHANDLE NewTokenHandle);
 
 #define TokenIntegrityLevel (TOKEN_INFORMATION_CLASS)25
 typedef struct _TOKEN_MANDATORY_LABEL{
     SID_AND_ATTRIBUTES Label;
 }TOKEN_MANDATORY_LABEL,*PTOKEN_MANDATORY_LABEL;
 
+#define TokenUser (TOKEN_INFORMATION_CLASS)1 
+#define TokenGroups (TOKEN_INFORMATION_CLASS)2 
+#define TokenLogonSid (TOKEN_INFORMATION_CLASS)28 
+#define DISABLE_MAX_PRIVILEGE 1
 
 int Protect(HANDLE hProc,ULONG memlimit){
     HMODULE hKernel32;
     FUNC_CreateJobObject CreateJobObject;
     FUNC_SetInformationJobObject SetInformationJobObject;
     FUNC_AssignProcessToJobObject AssignProcessToJobObject;
-    FUNC_ConvertStringSidToSid ConvertStringSidToSid;
 
     HANDLE hJob;
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION JELI;
     JOBOBJECT_BASIC_UI_RESTRICTIONS JBUR;
-    PSID pSID;
-    TOKEN_MANDATORY_LABEL TML;
-    HANDLE hToken;
 
     hKernel32 = GetModuleHandle(L"kernel32.dll");
     CreateJobObject = (FUNC_CreateJobObject)GetProcAddress(hKernel32,"CreateJobObjectW");
     SetInformationJobObject = (FUNC_SetInformationJobObject)GetProcAddress(hKernel32,"SetInformationJobObject");
     AssignProcessToJobObject = (FUNC_AssignProcessToJobObject)GetProcAddress(hKernel32,"AssignProcessToJobObject");
-    ConvertStringSidToSid = (FUNC_ConvertStringSidToSid)GetProcAddress(GetModuleHandle(L"advapi32.dll"),"ConvertStringSidToSidW");
 
     hJob = CreateJobObject(NULL,NULL);
 
@@ -57,17 +58,6 @@ int Protect(HANDLE hProc,ULONG memlimit){
 	    &JBUR,
 	    sizeof(JOBOBJECT_BASIC_UI_RESTRICTIONS));
     AssignProcessToJobObject(hJob,hProc);
-
-    OpenProcessToken(hProc,TOKEN_ALL_ACCESS,&hToken);
-    AdjustTokenPrivileges(hToken,TRUE,NULL,0,NULL,NULL);
-
-    ConvertStringSidToSid(L"S-1-16-0",&pSID);
-    TML.Label.Sid = pSID;
-    TML.Label.Attributes = SE_GROUP_INTEGRITY;
-    SetTokenInformation(hToken,TokenIntegrityLevel,&TML,sizeof(TOKEN_MANDATORY_LABEL) + GetLengthSid(pSID));
-
-    LocalFree(pSID);
-    CloseHandle(hToken);
 
     return 0;
 }
@@ -136,55 +126,44 @@ DWORD WINAPI IoThread(LPVOID lpParameter){
     return 0;
 }
 
-int RF_Patch(HANDLE hProc){
-    int i,j;
-
-    HMODULE hNtDll;
-    ULONG base;
-    PIMAGE_OPTIONAL_HEADER pIOH;
-    PIMAGE_EXPORT_DIRECTORY pIED;
-    PULONG rvaList;
-    char *name;
-    int flag;
-
-    hNtDll = GetModuleHandle(L"ntdll.dll");
-    base = (ULONG)hNtDll;
-
-    pIOH = &((PIMAGE_NT_HEADERS)(base + ((PIMAGE_DOS_HEADER)base)->e_lfanew))->OptionalHeader;
-    pIED = (PIMAGE_EXPORT_DIRECTORY)(base + pIOH->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress); 
-
-    int tmp=0;
-
-    rvaList = (PULONG)(base + pIED->AddressOfNames);
-    for(i = 0;i < pIED->NumberOfNames;i++){
-	name = (char*)(base + rvaList[i]);
-	if(name[0] == 'Z' && name[1] == 'w'){
-	    printf("%s %08x\n",name,(ULONG)GetProcAddress(hNtDll,name));
-	}
-    }
-
-    return 0;
-}
-
 int main(int argc,char *args[]){
+    HMODULE hAdvapi32;
+    FUNC_ConvertSidToStringSid ConvertSidToStringSid;
+    FUNC_ConvertStringSidToSid ConvertStringSidToSid;
+    FUNC_CreateRestrictedToken CreateRestrictedToken;
+
+    int i,j;
+    ULONG ret;
+
     SECURITY_ATTRIBUTES sa;
     HANDLE hFile;
     HANDLE hOutPipe;
     HANDLE hIoThread;
 
+    HANDLE hOriToken;
+    HANDLE hToken;
+    PSID_AND_ATTRIBUTES pSID_ATTR;
+    PTOKEN_GROUPS pTokenGroup;
+    PTOKEN_USER pTokenUser;
+    PWCHAR SIDStr;
+    PSID pSID;
+    TOKEN_MANDATORY_LABEL TML;
+
     STARTUPINFOA stInfo;
     PROCESS_INFORMATION procInfo;
-    DEBUG_EVENT dbgEvent;
 
     PVOID rDllName;
     WCHAR ComEventName[128];
     HANDLE hComEvent;
     WCHAR ComMapName[128];
     HANDLE hComMap;
-    PULONG pDllState;
-
-    int timeoutCount;
+    PULONG pDllState; 
     PROCESS_MEMORY_COUNTERS memInfo;
+
+    hAdvapi32 = GetModuleHandle(L"advapi32.dll");
+    ConvertSidToStringSid = (FUNC_ConvertSidToStringSid)GetProcAddress(hAdvapi32,"ConvertSidToStringSidW");
+    ConvertStringSidToSid = (FUNC_ConvertStringSidToSid)GetProcAddress(hAdvapi32,"ConvertStringSidToSidW");
+    CreateRestrictedToken = (FUNC_CreateRestrictedToken)GetProcAddress(hAdvapi32,"CreateRestrictedToken");
 
     if(argc != 6){
 	printf("name.exe time(ms) mem(KB) inputfile ansfile\n");
@@ -215,13 +194,48 @@ int main(int argc,char *args[]){
 
     CreatePipe(&hInPipe,&hOutPipe,&sa,65536);
 
+    OpenProcessToken(GetCurrentProcess(),TOKEN_ALL_ACCESS,&hOriToken);
+    DuplicateTokenEx(hOriToken,0,NULL,SecurityImpersonation,TokenPrimary,&hToken);
+
+    GetTokenInformation(hOriToken,TokenGroups,NULL,0,&ret); 
+    pTokenGroup = (PTOKEN_GROUPS)malloc(ret);
+    GetTokenInformation(hOriToken,TokenGroups,pTokenGroup,ret,&ret); 
+    pSID_ATTR = (PSID_AND_ATTRIBUTES)malloc(sizeof(SID_AND_ATTRIBUTES) * (pTokenGroup->GroupCount + 1));
+    j = 0;
+    for(i = 0;i < pTokenGroup->GroupCount;i++){
+	ConvertSidToStringSid(pTokenGroup->Groups[i].Sid,&SIDStr);
+	if(wcscmp(SIDStr,L"S-1-1-0") != 0 && wcscmp(SIDStr,L"S-1-5-32-545") != 0){
+	    memcpy(&pSID_ATTR[j],&pTokenGroup->Groups[i],sizeof(SID_AND_ATTRIBUTES));
+	    j++;
+	}
+	LocalFree(SIDStr);
+    }
+    free(pTokenGroup);
+
+    GetTokenInformation(hOriToken,TokenUser,NULL,0,&ret); 
+    pTokenUser = (PTOKEN_USER)malloc(ret);
+    GetTokenInformation(hOriToken,TokenUser,pTokenUser,ret,&ret); 
+    memcpy(&pSID_ATTR[j],&pTokenUser->User,sizeof(SID_AND_ATTRIBUTES));
+    j++;
+    free(pTokenUser);
+
+    CreateRestrictedToken(hOriToken,DISABLE_MAX_PRIVILEGE,j,pSID_ATTR,0,NULL,0,NULL,&hToken);
+    free(pSID_ATTR);
+
+    ConvertStringSidToSid(L"S-1-16-4096",&pSID);
+    TML.Label.Sid = pSID;
+    TML.Label.Attributes = SE_GROUP_INTEGRITY;
+    SetTokenInformation(hToken,TokenIntegrityLevel,&TML,sizeof(TOKEN_MANDATORY_LABEL) + GetLengthSid(pSID));
+    LocalFree(pSID);
+
     memset(&stInfo,0,sizeof(STARTUPINFO));
     stInfo.cb = sizeof(STARTUPINFO);
     stInfo.dwFlags = STARTF_USESTDHANDLES;
     stInfo.hStdInput = hFile;
     stInfo.hStdOutput = hOutPipe;
     stInfo.hStdError = hOutPipe;
-    CreateProcessA(args[1],
+    CreateProcessAsUserA(hToken,
+	    args[1],
 	    NULL,
 	    NULL,
 	    NULL,
@@ -240,7 +254,6 @@ int main(int argc,char *args[]){
     hComMap = CreateFileMapping(NULL,NULL,PAGE_READWRITE,0,sizeof(JUDGE_INFO),ComMapName);
     pDllState = (PULONG)MapViewOfFile(hComMap,FILE_MAP_ALL_ACCESS,0,0,sizeof(ULONG));
 
-    judgeInfo.timestart = 0;
     judgeInfo.state = JUDGE_STATE_AC;
     *pDllState = JUDGE_STATE_RE;
 
