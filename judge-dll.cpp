@@ -8,32 +8,19 @@ HANDLE hComEvent;
 HANDLE hComMap;
 PULONG pDllState;
 
-HANDLE hLog;
-
-void dbg(ULONG dbgAddr){
-    WriteFile(hLog,(char*)dbgAddr,strlen((char*)dbgAddr),NULL,NULL);
-}
 void RF_Hook(){
-    ULONG dbgAddr;
-
-    __asm("movl %0,%%eax":"=r"(dbgAddr)::);
-
-    dbg(dbgAddr);
-
     *pDllState = JUDGE_STATE_RF;
-    SetEvent(hComEvent);
     TerminateProcess(GetCurrentProcess(),0);
 }
 int Patch(HANDLE hProc,ULONG addr,ULONG hook,ULONG dbgAddr){
     ULONG rl;
     ULONG old;
-    UCHAR code[10]={0xB8,0x0,0x0,0x0,0x0,0xE9,0x0,0x0,0x0,0x0};
+    UCHAR code[5]={0xE9,0x0,0x0,0x0,0x0};
 
-    *(PULONG)(code + 1) = dbgAddr;
-    *(PULONG)(code + 6) = hook - addr - 5;
+    *(PULONG)(code + 1) = hook - addr - 5;
 
-    VirtualProtectEx(hProc,(PVOID)addr,10,PAGE_EXECUTE_READWRITE,&old); 
-    WriteProcessMemory(hProc,(PVOID)addr,(PVOID)code,10,&rl);
+    VirtualProtectEx(hProc,(PVOID)addr,5,PAGE_EXECUTE_READWRITE,&old); 
+    WriteProcessMemory(hProc,(PVOID)addr,(PVOID)code,5,&rl);
 
     return 0;
 }
@@ -63,7 +50,11 @@ char excludeList[128][128] = {
     "ZwTestAlert",
     "ZwCreateSemaphore",
     "ZwRequestWaitReplyPort",
-    "ZwQueryPerformanceCounter"
+    "ZwQueryPerformanceCounter",
+    "ZwQueryInformationThread",
+    "ZwTerminateThread",
+    "ZwReleaseMutant",
+    "ZwWaitForSingleObject"
 };
 int RF_Patch(HANDLE hProc){
     int i,j;
@@ -87,7 +78,7 @@ int RF_Patch(HANDLE hProc){
 	name = (char*)(base + rvaList[i]);
 	if(name[0] == 'Z' && name[1] == 'w'){
 	    flag = 0;
-	    for(j = 0;j < 25;j++){
+	    for(j = 0;j < 29;j++){
 		if(strcmp(name,excludeList[j]) == 0){
 		    flag = 1;
 		    break;
@@ -102,40 +93,23 @@ int RF_Patch(HANDLE hProc){
     return 0;
 }
 
-DWORD WINAPI watcher(LPVOID lpParameter){
-    WCHAR ComEventName[128];
-    WCHAR ComMapName[128];
-
-    SetErrorMode(SEM_NOGPFAULTERRORBOX);
-
-    wsprintf(ComEventName,L"JUDGE_COMEVENT_%u",GetCurrentProcessId());
-    hComEvent = OpenEvent(EVENT_ALL_ACCESS,FALSE,ComEventName);
-    wsprintf(ComMapName,L"JUDGE_COMMAP_%u",GetCurrentProcessId());
-    hComMap = OpenFileMapping(FILE_MAP_ALL_ACCESS,FALSE,ComMapName);
-    pDllState = (PULONG)MapViewOfFile(hComMap,FILE_MAP_ALL_ACCESS,0,0,sizeof(ULONG));
-
-    hLog = CreateFileA("RFLog.txt",
-	    GENERIC_WRITE,
-	    0,
-	    NULL,
-	    CREATE_ALWAYS,
-	    0,
-	    NULL);
-
-    RF_Patch(GetCurrentProcess());
-
-    while(true){
-	SetEvent(hComEvent);
-	Sleep(100);
-    }
-}
-
 extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL,DWORD fdwReason,LPVOID lpvReserved){
     if(fdwReason == DLL_PROCESS_ATTACH){
-	CreateThread(NULL,0,watcher,NULL,0,NULL);
+	WCHAR ComEventName[128];
+	WCHAR ComMapName[128];
+
+	SetErrorMode(SEM_NOGPFAULTERRORBOX);
+
+	wsprintf(ComEventName,L"JUDGE_COMEVENT_%u",GetCurrentProcessId());
+	hComEvent = OpenEvent(EVENT_ALL_ACCESS,FALSE,ComEventName);
+	wsprintf(ComMapName,L"JUDGE_COMMAP_%u",GetCurrentProcessId());
+	hComMap = OpenFileMapping(FILE_MAP_ALL_ACCESS,FALSE,ComMapName);
+	pDllState = (PULONG)MapViewOfFile(hComMap,FILE_MAP_ALL_ACCESS,0,0,sizeof(ULONG));
+
+	RF_Patch(GetCurrentProcess());
+	SetEvent(hComEvent);
     }else if(fdwReason == DLL_PROCESS_DETACH){	
 	*pDllState = JUDGE_STATE_AC;
-	SetEvent(hComEvent);
     }
 
     return TRUE;

@@ -136,6 +136,36 @@ DWORD WINAPI IoThread(LPVOID lpParameter){
     return 0;
 }
 
+int RF_Patch(HANDLE hProc){
+    int i,j;
+
+    HMODULE hNtDll;
+    ULONG base;
+    PIMAGE_OPTIONAL_HEADER pIOH;
+    PIMAGE_EXPORT_DIRECTORY pIED;
+    PULONG rvaList;
+    char *name;
+    int flag;
+
+    hNtDll = GetModuleHandle(L"ntdll.dll");
+    base = (ULONG)hNtDll;
+
+    pIOH = &((PIMAGE_NT_HEADERS)(base + ((PIMAGE_DOS_HEADER)base)->e_lfanew))->OptionalHeader;
+    pIED = (PIMAGE_EXPORT_DIRECTORY)(base + pIOH->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress); 
+
+    int tmp=0;
+
+    rvaList = (PULONG)(base + pIED->AddressOfNames);
+    for(i = 0;i < pIED->NumberOfNames;i++){
+	name = (char*)(base + rvaList[i]);
+	if(name[0] == 'Z' && name[1] == 'w'){
+	    printf("%s %08x\n",name,(ULONG)GetProcAddress(hNtDll,name));
+	}
+    }
+
+    return 0;
+}
+
 int main(int argc,char *args[]){
     SECURITY_ATTRIBUTES sa;
     HANDLE hFile;
@@ -212,7 +242,7 @@ int main(int argc,char *args[]){
 
     judgeInfo.timestart = 0;
     judgeInfo.state = JUDGE_STATE_AC;
-    *pDllState = JUDGE_STATE_RUN;
+    *pDllState = JUDGE_STATE_RE;
 
     rDllName = VirtualAllocEx(procInfo.hProcess,NULL,strlen(DLL_NAME) + 1,MEM_COMMIT | MEM_RESERVE,PAGE_READWRITE);
     WriteProcessMemory(procInfo.hProcess,rDllName,DLL_NAME,strlen(DLL_NAME) + 1,NULL);
@@ -226,46 +256,29 @@ int main(int argc,char *args[]){
 
     hIoThread = CreateThread(NULL,0,IoThread,NULL,0,NULL);
     WaitForSingleObject(hComEvent,INFINITE);
-    Protect(procInfo.hProcess,judgeInfo.memlimit);
+    Protect(procInfo.hProcess,judgeInfo.memlimit + 32 * 1024);
     judgeInfo.timestart = GetTickCount();
 
     ResumeThread(procInfo.hThread);
 
-    timeoutCount = 0;
-    while(true){
-	if(WaitForSingleObject(hComEvent,200) == WAIT_TIMEOUT){ 
-	    timeoutCount++;
-	    if(timeoutCount >= 6){
-		judgeInfo.state = JUDGE_STATE_RE;
-		break;
-	    }
-	}else{
-	    timeoutCount = 0;
-	    if((GetTickCount() - judgeInfo.timestart) > judgeInfo.timelimit){
-		judgeInfo.state = JUDGE_STATE_TLE;
-		break;
-	    }else if(*pDllState != JUDGE_STATE_RUN){
-		if(*pDllState != JUDGE_STATE_AC){
-		    judgeInfo.state = *pDllState;
-		}
-		break;
-	    }
-	}
-    }
-
+    WaitForSingleObject(procInfo.hProcess,judgeInfo.timelimit + 100);
     judgeInfo.timeend = GetTickCount();
     TerminateProcess(procInfo.hProcess,0);
     CloseHandle(hOutPipe);
     WaitForSingleObject(hIoThread,INFINITE);
 
-    printf("Time: %lums\n",judgeInfo.timeend - judgeInfo.timestart);
-
+    if(*pDllState != JUDGE_STATE_AC){
+	judgeInfo.state = *pDllState;
+    }else if((judgeInfo.timeend - judgeInfo.timestart) > judgeInfo.timelimit){
+	judgeInfo.state = JUDGE_STATE_TLE;
+    }
     GetProcessMemoryInfo(procInfo.hProcess,&memInfo,sizeof(PROCESS_MEMORY_COUNTERS));
-    printf("Memory: %dKB\n",(memInfo.PeakPagefileUsage / 1024));
-
-    if(memInfo.PeakPagefileUsage >= judgeInfo.memlimit){
+    if(memInfo.PeakPagefileUsage > judgeInfo.memlimit){
 	judgeInfo.state = JUDGE_STATE_MLE;
     }
+
+    printf("Time: %lums\n",judgeInfo.timeend - judgeInfo.timestart);
+    printf("Memory: %dKB\n",(memInfo.PeakPagefileUsage / 1024));
 
     if(judgeInfo.state == JUDGE_STATE_AC){
 	printf("Status: AC\n");

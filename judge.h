@@ -1,4 +1,3 @@
-#define JUDGE_STATE_RUN 0x0
 #define JUDGE_STATE_AC 0x1
 #define JUDGE_STATE_WA 0x2
 #define JUDGE_STATE_TLE 0x3
