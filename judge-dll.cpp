@@ -95,18 +95,16 @@ int RF_Patch(HANDLE hProc){
 
 extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL,DWORD fdwReason,LPVOID lpvReserved){
     if(fdwReason == DLL_PROCESS_ATTACH){
-	WCHAR ComEventName[128];
-	WCHAR ComMapName[128];
+	JUDGE_DLL_INFO dllInfo;
 
 	SetErrorMode(SEM_NOGPFAULTERRORBOX);
 
-	wsprintf(ComEventName,L"JUDGE_COMEVENT_%u",GetCurrentProcessId());
-	hComEvent = OpenEvent(EVENT_ALL_ACCESS,FALSE,ComEventName);
-	wsprintf(ComMapName,L"JUDGE_COMMAP_%u",GetCurrentProcessId());
-	hComMap = OpenFileMapping(FILE_MAP_ALL_ACCESS,FALSE,ComMapName);
+	CopyMemory(&dllInfo,DLL_INFO_ADDR,sizeof(JUDGE_DLL_INFO));
+	hComEvent = dllInfo.hComEvent;
+	hComMap = dllInfo.hComMap;
 	pDllState = (PULONG)MapViewOfFile(hComMap,FILE_MAP_ALL_ACCESS,0,0,sizeof(ULONG));
 
-	RF_Patch(GetCurrentProcess());
+	//RF_Patch(GetCurrentProcess());
 	SetEvent(hComEvent);
     }else if(fdwReason == DLL_PROCESS_DETACH){	
 	*pDllState = JUDGE_STATE_AC;
