@@ -104,7 +104,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL,DWORD fdwReason,LPVOID lpvRese
 	hComMap = dllInfo.hComMap;
 	pDllState = (PULONG)MapViewOfFile(hComMap,FILE_MAP_ALL_ACCESS,0,0,sizeof(ULONG));
 
-	//RF_Patch(GetCurrentProcess());
+	RF_Patch(GetCurrentProcess());
 	SetEvent(hComEvent);
     }else if(fdwReason == DLL_PROCESS_DETACH){	
 	*pDllState = JUDGE_STATE_AC;
