@@ -6,8 +6,6 @@
 #include<stdio.h>
 #include<stdlib.h>
 
-#include"judge.h"
-
 typedef BOOL WINAPI (*FUNC_ConvertStringSidToSid)(LPCTSTR StringSid,PSID *Sid);
 
 int Set_Priv(HANDLE hToken,PWCHAR pPrivStr,BOOL enable){
@@ -93,7 +91,6 @@ int main(){
     Set_ACL(L"C:\\Windows\\System32\\wow64cpu.dll");
     Set_ACL(L"C:\\Windows\\System32\\wow64win.dll");
     Set_ACL(L"C:\\Windows");
-    Set_ACL(L_DLL_NAME);
 
     return 0;
 }
