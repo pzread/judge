@@ -1,5 +1,4 @@
 #define UNICODE
-#define DLL_NAME "judge-dll.dll"
 
 #include<windows.h>
 #include<psapi.h>
@@ -12,8 +11,8 @@
 typedef HANDLE WINAPI (*FUNC_CreateJobObject)(LPSECURITY_ATTRIBUTES lpJobAttributes,LPCTSTR lpName);
 typedef BOOL WINAPI (*FUNC_SetInformationJobObject)(HANDLE hJob,JOBOBJECTINFOCLASS JobObjectInfoClass,LPVOID lpJobObjectInfo,DWORD cbJobObjectInfoLength);
 typedef BOOL WINAPI (*FUNC_AssignProcessToJobObject)(HANDLE hJob,HANDLE hProcess);
-typedef BOOL WINAPI (*FUNC_ConvertStringSidToSid)(LPCTSTR StringSid,PSID *Sid);
 typedef BOOL WINAPI (*FUNC_ConvertSidToStringSid)(PSID Sid,LPTSTR *StringSid);
+typedef BOOL WINAPI (*FUNC_ConvertStringSidToSid)(LPCTSTR StringSid,PSID *Sid);
 typedef BOOL WINAPI (*FUNC_CreateRestrictedToken)(HANDLE ExistingTokenHandle,DWORD Flags,DWORD DisableSidCount,PSID_AND_ATTRIBUTES SidsToDisable,DWORD DeletePrivilegeCount,PLUID_AND_ATTRIBUTES PrivilegesToDelete,DWORD RestrictedSidCount,PSID_AND_ATTRIBUTES SidsToRestrict,PHANDLE NewTokenHandle);
 
 typedef struct{
@@ -49,7 +48,7 @@ HANDLE Create_Token(){
     PSID_AND_ATTRIBUTES pSID_ATTR;
     PTOKEN_GROUPS pTokenGroup;
     PTOKEN_USER pTokenUser;
-    PWCHAR SIDStr;
+    PWCHAR pSIDStr;
     PSID pSID;
     TOKEN_MANDATORY_LABEL TML;
 
@@ -67,12 +66,12 @@ HANDLE Create_Token(){
     pSID_ATTR = (PSID_AND_ATTRIBUTES)malloc(sizeof(SID_AND_ATTRIBUTES) * (pTokenGroup->GroupCount + 1));
     j = 0;
     for(i = 0;i < pTokenGroup->GroupCount;i++){
-	ConvertSidToStringSid(pTokenGroup->Groups[i].Sid,&SIDStr);
-	if(wcscmp(SIDStr,L"S-1-1-0") != 0 && wcscmp(SIDStr,L"S-1-5-32-545") != 0){
+	ConvertSidToStringSid(pTokenGroup->Groups[i].Sid,&pSIDStr);
+	if(wcscmp(pSIDStr,L"S-1-1-0") != 0){
 	    memcpy(&pSID_ATTR[j],&pTokenGroup->Groups[i],sizeof(SID_AND_ATTRIBUTES));
 	    j++;
 	}
-	LocalFree(SIDStr);
+	LocalFree(pSIDStr);
     }
     free(pTokenGroup);
 
@@ -81,6 +80,10 @@ HANDLE Create_Token(){
     GetTokenInformation(hOriToken,TokenUser,pTokenUser,ret,&ret); 
     memcpy(&pSID_ATTR[j],&pTokenUser->User,sizeof(SID_AND_ATTRIBUTES));
     j++;
+
+    pTokenUser->User.Attributes = SE_GROUP_USE_FOR_DENY_ONLY;
+    SetTokenInformation(hOriToken,TokenUser,pTokenUser,ret); 
+
     free(pTokenUser);
 
     CreateRestrictedToken(hOriToken,DISABLE_MAX_PRIVILEGE,j,pSID_ATTR,0,NULL,0,NULL,&hToken);
@@ -124,12 +127,14 @@ int Init_Hook(HANDLE hProc,HANDLE hComEvent,HANDLE hComMap){
     ULONG ret;
 
     JUDGE_DLL_INFO dllInfo;
+    PVOID addr;
     PVOID rDllName;
 
     dllInfo.hComEvent = hComEvent;
     dllInfo.hComMap = hComMap;
-    VirtualProtectEx(hProc,DLL_INFO_ADDR,sizeof(JUDGE_DLL_INFO),PAGE_READWRITE,&ret); 
-    WriteProcessMemory(hProc,DLL_INFO_ADDR,&dllInfo,sizeof(JUDGE_DLL_INFO),NULL);
+    addr = (PVOID)((ULONG)GetModuleHandle(L"ntdll.dll") + sizeof(IMAGE_DOS_HEADER));
+    VirtualProtectEx(hProc,addr,sizeof(JUDGE_DLL_INFO),PAGE_READWRITE,&ret);
+    WriteProcessMemory(hProc,addr,&dllInfo,sizeof(JUDGE_DLL_INFO),NULL);
 
     rDllName = VirtualAllocEx(hProc,NULL,strlen(DLL_NAME) + 1,MEM_COMMIT | MEM_RESERVE,PAGE_READWRITE);
     WriteProcessMemory(hProc,rDllName,DLL_NAME,strlen(DLL_NAME) + 1,NULL);

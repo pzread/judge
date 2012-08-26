@@ -99,7 +99,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinstDLL,DWORD fdwReason,LPVOID lpvRese
 
 	SetErrorMode(SEM_NOGPFAULTERRORBOX);
 
-	CopyMemory(&dllInfo,DLL_INFO_ADDR,sizeof(JUDGE_DLL_INFO));
+	CopyMemory(&dllInfo,(PVOID)((ULONG)GetModuleHandle(L"ntdll.dll") + sizeof(IMAGE_DOS_HEADER)),sizeof(JUDGE_DLL_INFO));
 	hComEvent = dllInfo.hComEvent;
 	hComMap = dllInfo.hComMap;
 	pDllState = (PULONG)MapViewOfFile(hComMap,FILE_MAP_ALL_ACCESS,0,0,sizeof(ULONG));
