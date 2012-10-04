@@ -5,3 +5,4 @@
 #define JUDGE_MLE 3
 #define JUDGE_RF 4
 #define JUDGE_RE 5
+#define JUDGE_CE 6

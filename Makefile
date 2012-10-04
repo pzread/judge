@@ -6,6 +6,7 @@ else
 	PWD := $(shell pwd)
 default:
 	${MAKE} -C ${KERNEL_SOURCE} SUBDIRS=${PWD} modules
+	gcc judge_app.c judge_server.c judge_ini.c -lcap -ldl -lpthread -lmysqlclient -o judge
 clean:
 	${MAKE} -C ${KERNEL_SOURCE} SUBDIRS=${PWD} clean
 endif

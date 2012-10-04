@@ -1,0 +1,5 @@
+[JUDGE]
+timelimit=1000
+memlimit=65536
+count=1
+score=100
