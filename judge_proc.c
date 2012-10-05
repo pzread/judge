@@ -1,4 +1,20 @@
-struct judge_proc_info* judge_proc_create(char *path,char *sopath,unsigned long timelimit,unsigned long memlimit){
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
+#include<fcntl.h>
+#include<dlfcn.h>
+#include<limits.h>
+#include<signal.h>
+#include<sys/ioctl.h>
+#include<sys/capability.h>
+#include<sys/resource.h>
+#include<sys/stat.h>
+
+#include"judge.h"
+#include"judge_proc.h"
+#include"judge_com.h"
+
+struct judge_proc_info* judge_proc_create(char *abspath,char *path,char *sopath,unsigned long timelimit,unsigned long memlimit){
     int ret;
     int i,j;
 
@@ -25,9 +41,9 @@ struct judge_proc_info* judge_proc_create(char *path,char *sopath,unsigned long 
 	goto error;
     }
 
-    proc_info->path[PATH_MAX] = '\0';
+    proc_info->path[0] = '\0';
     strncat(proc_info->path,path,sizeof(proc_info->path));
-    check_info->sopath[PATH_MAX] = '\0';
+    check_info->sopath[0] = '\0';
     strncat(check_info->sopath,sopath,sizeof(check_info->sopath));
 
     if((check_info->sohandle = dlopen(check_info->sopath,RTLD_NOW)) == NULL){
@@ -37,9 +53,9 @@ struct judge_proc_info* judge_proc_create(char *path,char *sopath,unsigned long 
     check_info->run_fn = dlsym(check_info->sohandle,"run_fn");
     check_info->post_fn = dlsym(check_info->sohandle,"post_fn");
     check_info->clean_fn = dlsym(check_info->sohandle,"clean_fn");
-    check_info->private = NULL;
+    check_info->data = NULL;
 
-    if(check_info->init_fn(&check_info->private)){
+    if(check_info->init_fn(abspath,&check_info->data)){
 	goto error;
     }
 
@@ -59,6 +75,8 @@ struct judge_proc_info* judge_proc_create(char *path,char *sopath,unsigned long 
     proc_info->check_info = check_info;
     proc_info->timelimit = timelimit;
     proc_info->memlimit = memlimit;
+    proc_info->runtime = 0L;
+    proc_info->peakmem = 0L;
 
     return proc_info;
 
@@ -74,6 +92,7 @@ error:
     return (void*)-1;
 }
 int judge_proc_free(struct judge_proc_info *proc_info){
+    dlclose(proc_info->check_info->sohandle);
     free(proc_info->check_info);
     free(proc_info);
 
@@ -103,9 +122,10 @@ static int proc_protect(struct judge_proc_info *proc_info){
     limit.rlim_max = limit.rlim_cur;
     prlimit(proc_info->pid,RLIMIT_AS,&limit,NULL);
 
+    com_proc_add.path[0] = '\0';
     strncat(com_proc_add.path,proc_info->path,sizeof(com_proc_add.path));
     com_proc_add.pid = proc_info->pid;
-    if(ioctl(modfd,IOCTL_PROC_ADD,&com_proc_add)){
+    if(ioctl(judge_modfd,IOCTL_PROC_ADD,&com_proc_add)){
 	return -1;
     }
     proc_info->task = com_proc_add.task;
@@ -115,7 +135,6 @@ static int proc_protect(struct judge_proc_info *proc_info){
 int judge_proc_run(struct judge_proc_info *proc_info){
     int ret;
 
-    struct judge_proc_info *proc_info;
     struct judge_check_info *check_info;
     int waitstate;
     struct judge_com_proc_get com_proc_get;
@@ -127,7 +146,7 @@ int judge_proc_run(struct judge_proc_info *proc_info){
 	char *argv[] = {NULL,NULL};
 	char *envp[] = {NULL};
 
-	if(check_info->run_fn(check_info->private)){
+	if(check_info->run_fn(check_info->data)){
 	    exit(-1);
 	}
 	setgid(99);
@@ -137,6 +156,7 @@ int judge_proc_run(struct judge_proc_info *proc_info){
 	argv[0] = proc_info->name;
 	execve(proc_info->path,argv,envp);
     }
+
     if(proc_info->pid == -1){
 	ret = -1;
 	goto clean;
@@ -147,7 +167,7 @@ int judge_proc_run(struct judge_proc_info *proc_info){
 	ret = -1;
 	goto clean;
     }
-    
+
     kill(proc_info->pid,SIGCONT);
     if(waitpid(proc_info->pid,&waitstate,0) == -1){
 	ret = -1;
@@ -155,10 +175,11 @@ int judge_proc_run(struct judge_proc_info *proc_info){
     }
 
     com_proc_get.task = proc_info->task;
-    if(ioctl(modfd,IOCTL_PROC_GET,&com_proc_get)){
+    if(ioctl(judge_modfd,IOCTL_PROC_GET,&com_proc_get)){
 	ret = -1;
 	goto clean;
     }
+
     proc_info->runtime = com_proc_get.runtime;
     proc_info->peakmem = com_proc_get.peakmem;
 
@@ -173,7 +194,7 @@ int judge_proc_run(struct judge_proc_info *proc_info){
     }else if(WEXITSTATUS(waitstate) == JUDGE_RF){
 	proc_info->state = JUDGE_RF;
     }else{
-	proc_info->state = check_info->post_fn(check_info->private);
+	proc_info->state = check_info->post_fn(check_info->data);
     }
 
 clean:
@@ -182,11 +203,9 @@ clean:
 	kill(proc_info->pid,SIGKILL);
     }
     if(proc_info->task != -1){
-	ioctl(modfd,IOCTL_PROC_DEL,proc_info->task);
+	ioctl(judge_modfd,IOCTL_PROC_DEL,proc_info->task);
     }
-    check_info->clean_fn(check_info->private);
-    free(proc_info);
-    free(check_info);
+    check_info->clean_fn(check_info->data);
 
     return ret;
 }

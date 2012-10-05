@@ -313,7 +313,8 @@ static int proc_get_path(char *in_path,char *real_path){
     }
 
     buf_path = kmalloc(sizeof(char) * (PATH_MAX + 1),GFP_KERNEL);
-    strncpy(real_path,d_path(&f->f_path,buf_path,PATH_MAX + 1),PATH_MAX);
+    real_path[0] = '\0';
+    strncat(real_path,d_path(&f->f_path,buf_path,PATH_MAX + 1),PATH_MAX + 1);
     real_path[PATH_MAX] = '\0';
     kfree(buf_path);
     filp_close(f,NULL);
@@ -473,10 +474,7 @@ static int hook_file_open(struct file *file, const struct cred *cred){
 
     if((file->f_mode & !(FMODE_READ | FMODE_LSEEK | FMODE_PREAD | FMODE_EXEC)) != 0){
 	ret = -EACCES;
-    }else if(strcmp(path,info->path) != 0 &&
-	    strcmp(path,"/usr/lib/ld-2.16.so") != 0 &&
-	    strcmp(path,"/etc/ld.so.cache") != 0 &&
-	    strcmp(path,"/usr/lib/libc-2.16.so") != 0){
+    }else if(strcmp(path,info->path) != 0){
 	ret = -EACCES;
     }
 

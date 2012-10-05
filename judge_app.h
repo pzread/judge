@@ -1,3 +1,3 @@
-static int modfd;
+int judge_modfd;
 
 extern int judge_server();
