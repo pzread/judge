@@ -150,8 +150,8 @@ static int __init mod_init(){
     hook_sops.socket_connect = hook_socket_connect;
     hook_sops.socket_listen = hook_socket_listen;
     hook_sops.socket_accept = hook_socket_accept;
-    //hook_sops.socket_sendmsg = hook_socket_sendmsg;
-    //hook_sops.socket_recvmsg = hook_socket_recvmsg;
+    hook_sops.socket_sendmsg = hook_socket_sendmsg;
+    hook_sops.socket_recvmsg = hook_socket_recvmsg;
     hook_sops.socket_getsockname = hook_socket_getsockname;
     hook_sops.socket_getpeername = hook_socket_getpeername;
     hook_sops.socket_getsockopt = hook_socket_getsockopt;
@@ -160,8 +160,8 @@ static int __init mod_init(){
     //hook_sops.socket_sock_rcv_skb = hook_socket_sock_rcv_skb;
     hook_sops.socket_getpeersec_stream = hook_socket_getpeersec_stream;
     hook_sops.socket_getpeersec_dgram = hook_socket_getpeersec_dgram;
-    hook_sops.sk_alloc_security = hook_sk_alloc_security;
-    hook_sops.inet_conn_request = hook_inet_conn_request;
+    //hook_sops.sk_alloc_security = hook_sk_alloc_security;
+    //hook_sops.inet_conn_request = hook_inet_conn_request;
     hook_sops.secmark_relabel_packet = hook_secmark_relabel_packet;
     hook_sops.tun_dev_create = hook_tun_dev_create;
     hook_sops.tun_dev_attach = hook_tun_dev_attach;
@@ -226,7 +226,8 @@ static long mod_ioctl(struct file *file,unsigned int cmd,unsigned long arg){
 	    info->task = task;
 	    info->pin = fcheck_files(task->files,0);
 	    info->pout = fcheck_files(task->files,1);
-	    info->state = JUDGE_AC;
+	    info->status = JUDGE_AC;
+	    info->memlimit = com_proc_add->memlimit;
 	    if(proc_get_path(com_proc_add->path,info->path)){
 		put_task_struct(task);
 		kmem_cache_free(proc_info_cachep,info);
@@ -254,7 +255,7 @@ static long mod_ioctl(struct file *file,unsigned int cmd,unsigned long arg){
 		break;
 	    }
 
-	    com_proc_get->state = info->state;
+	    com_proc_get->status = info->status;
 	    com_proc_get->runtime = cputime_to_usecs(task->utime) + cputime_to_usecs(task->stime);
 	    com_proc_get->peakmem = info->peakmem;
 
@@ -448,7 +449,7 @@ static int hook_inode_permission(struct inode *inode,int mask){
     pr_alert("judge:PID %d  inode_permission %08x\n",current->tgid,mask);
 
     if((mask & ~(MAY_EXEC | MAY_READ | MAY_OPEN | MAY_CHDIR | MAY_NOT_BLOCK)) != 0){
-	info->state = JUDGE_RF;
+	info->status = JUDGE_RF;
 	send_sig(SIGKILL,current,0);
 	return -EACCES;
     }
@@ -481,7 +482,7 @@ static int hook_file_open(struct file *file, const struct cred *cred){
     kfree(buf_path);
 
     if(ret != 0){
-	info->state = JUDGE_RF;
+	info->status = JUDGE_RF;
 	send_sig(SIGKILL,current,0);
 	return ret;
     }
@@ -489,26 +490,25 @@ static int hook_file_open(struct file *file, const struct cred *cred){
 }
 static int hook_file_permission(struct file *file,int mask){
     struct proc_info *info;
-    char *buf_path,*path;
 
     info = proc_task_lookup(current);
     if(info == NULL){
 	return ori_sops->file_permission(file,mask);
     }
 
-    buf_path = kmalloc(sizeof(char) * (PATH_MAX + 1),GFP_KERNEL);
+    /*buf_path = kmalloc(sizeof(char) * (PATH_MAX + 1),GFP_KERNEL);
     path = d_path(&file->f_path,buf_path,PATH_MAX + 1);
 
-    //pr_alert("judge:PID %d  file_permission %s %08x\n",current->tgid,path,mask);
+    pr_alert("judge:PID %d  file_permission %s %08x\n",current->tgid,path,mask);
 
-    kfree(buf_path);
+    kfree(buf_path);*/
 
     if((mask & ~(MAY_READ | MAY_WRITE)) != 0){
-	info->state = JUDGE_RF;
+	info->status = JUDGE_RF;
 	send_sig(SIGKILL,current,0);
 	return -EACCES;
     }else if((mask & MAY_WRITE) != 0 && file != info->pout){
-	info->state = JUDGE_RF;
+	info->status = JUDGE_RF;
 	send_sig(SIGKILL,current,0);
 	return -EACCES;
     }
@@ -525,6 +525,11 @@ static int hook_vm_enough_memory(struct mm_struct *mm,long pages){
     info->peakmem = (mm->total_vm + pages) << PAGE_SHIFT;
     pr_alert("judge:PID %d  vm_enough_memory %lu\n",current->tgid,info->peakmem);
 
+    if(info->peakmem > info->memlimit){
+	info->status = JUDGE_MLE;
+	send_sig(SIGKILL,current,0);
+	return -EACCES;
+    }
     return ori_sops->vm_enough_memory(mm,pages);
 }
 
@@ -541,7 +546,7 @@ static int hook_ptrace_access_check(struct task_struct *child,unsigned int mode)
 
     pr_alert("judge:PID %d  ptrace_access_check\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -555,7 +560,7 @@ static int hook_ptrace_traceme(struct task_struct *parent){
 
     pr_alert("judge:PID %d  ptrace_traceme\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -569,7 +574,7 @@ static int hook_capget(struct task_struct *target,kernel_cap_t *effective,kernel
 
     pr_alert("judge:PID %d  capget\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -583,7 +588,7 @@ static int hook_capset(struct cred *new,const struct cred *old,const kernel_cap_
 
     pr_alert("judge:PID %d  capset\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -597,7 +602,7 @@ static int hook_capset(struct cred *new,const struct cred *old,const kernel_cap_
 
   pr_alert("judge:PID %d  capable\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -611,7 +616,7 @@ static int hook_quotactl(int cmds,int type,int id,struct super_block *sb){
 
     pr_alert("judge:PID %d  quotactl\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -625,7 +630,7 @@ static int hook_quota_on(struct dentry *dentry){
 
     pr_alert("judge:PID %d  quota_on\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -639,7 +644,7 @@ static int hook_syslog(int type){
 
     pr_alert("judge:PID %d  syslog\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -653,7 +658,7 @@ static int hook_settime(const struct timespec *ts,const struct timezone *tz){
 
     pr_alert("judge:PID %d  settime\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -667,7 +672,7 @@ static int hook_settime(const struct timespec *ts,const struct timezone *tz){
 
   pr_alert("judge:PID %d  bprm_set_creds\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -681,7 +686,7 @@ static int hook_settime(const struct timespec *ts,const struct timezone *tz){
 
   pr_alert("judge:PID %d  bprm_check_security\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -695,7 +700,7 @@ static int hook_settime(const struct timespec *ts,const struct timezone *tz){
 
   pr_alert("judge:PID %d  bprm_secureexec\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -709,7 +714,7 @@ static int hook_sb_alloc_security(struct super_block *sb){
 
     pr_alert("judge:PID %d  sb_alloc_security\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -723,7 +728,7 @@ static int hook_sb_copy_data(char *orig,char *copy){
 
     pr_alert("judge:PID %d  sb_copy_data\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -737,7 +742,7 @@ static int hook_sb_remount(struct super_block *sb,void *data){
 
     pr_alert("judge:PID %d  sb_remount\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -751,7 +756,7 @@ static int hook_sb_kern_mount(struct super_block *sb,int flags,void *data){
 
     pr_alert("judge:PID %d  sb_kern_mount\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -765,7 +770,7 @@ static int hook_sb_show_options(struct seq_file *m,struct super_block *sb){
 
     pr_alert("judge:PID %d  sb_show_options\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -779,7 +784,7 @@ static int hook_sb_statfs(struct dentry *dentry){
 
     pr_alert("judge:PID %d  sb_statfs\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -793,7 +798,7 @@ static int hook_sb_mount(char *dev_name,struct path *path,char *type,unsigned lo
 
     pr_alert("judge:PID %d  sb_mount\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -807,7 +812,7 @@ static int hook_sb_umount(struct vfsmount *mnt,int flags){
 
     pr_alert("judge:PID %d  sb_umount\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -821,7 +826,7 @@ static int hook_sb_pivotroot(struct path *old_path,struct path *new_path){
 
     pr_alert("judge:PID %d  sb_pivotroot\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -835,7 +840,7 @@ static int hook_sb_set_mnt_opts(struct super_block *sb,struct security_mnt_opts 
 
     pr_alert("judge:PID %d  sb_set_mnt_opts\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -849,7 +854,7 @@ static int hook_sb_parse_opts_str(char *options,struct security_mnt_opts *opts){
 
     pr_alert("judge:PID %d  sb_parse_opts_str\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -863,7 +868,7 @@ static int hook_path_unlink(struct path *dir,struct dentry *dentry){
 
     pr_alert("judge:PID %d  path_unlink\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -877,7 +882,7 @@ static int hook_path_mkdir(struct path *dir,struct dentry *dentry,umode_t mode){
 
     pr_alert("judge:PID %d  path_mkdir\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -891,7 +896,7 @@ static int hook_path_rmdir(struct path *dir,struct dentry *dentry){
 
     pr_alert("judge:PID %d  path_rmdir\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -905,7 +910,7 @@ static int hook_path_mknod(struct path *dir,struct dentry *dentry,umode_t mode,u
 
     pr_alert("judge:PID %d  path_mknod\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -919,7 +924,7 @@ static int hook_path_truncate(struct path *path){
 
     pr_alert("judge:PID %d  path_truncate\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -933,7 +938,7 @@ static int hook_path_symlink(struct path *dir,struct dentry *dentry,const char *
 
     pr_alert("judge:PID %d  path_symlink\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -947,7 +952,7 @@ static int hook_path_link(struct dentry *old_dentry,struct path *new_dir,struct 
 
     pr_alert("judge:PID %d  path_link\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -961,7 +966,7 @@ static int hook_path_rename(struct path *old_dir,struct dentry *old_dentry,struc
 
     pr_alert("judge:PID %d  path_rename\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -975,7 +980,7 @@ static int hook_path_chmod(struct path *path,umode_t mode){
 
     pr_alert("judge:PID %d  path_chmod\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -989,7 +994,7 @@ static int hook_path_chown(struct path *path,uid_t uid,gid_t gid){
 
     pr_alert("judge:PID %d  path_chown\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1003,7 +1008,7 @@ static int hook_path_chroot(struct path *path){
 
     pr_alert("judge:PID %d  path_chroot\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1017,7 +1022,7 @@ static int hook_path_chroot(struct path *path){
 
   pr_alert("judge:PID %d  inode_alloc_security\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -1031,7 +1036,7 @@ static int hook_inode_init_security(struct inode *inode,struct inode *dir,const 
 
     pr_alert("judge:PID %d  inode_init_security\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1045,7 +1050,7 @@ static int hook_inode_create(struct inode *dir,struct dentry *dentry,umode_t mod
 
     pr_alert("judge:PID %d  inode_create\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1059,7 +1064,7 @@ static int hook_inode_link(struct dentry *old_dentry,struct inode *dir,struct de
 
     pr_alert("judge:PID %d  inode_link\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1073,7 +1078,7 @@ static int hook_inode_unlink(struct inode *dir,struct dentry *dentry){
 
     pr_alert("judge:PID %d  inode_unlink\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1087,7 +1092,7 @@ static int hook_inode_symlink(struct inode *dir,struct dentry *dentry,const char
 
     pr_alert("judge:PID %d  inode_symlink\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1101,7 +1106,7 @@ static int hook_inode_mkdir(struct inode *dir,struct dentry *dentry,umode_t mode
 
     pr_alert("judge:PID %d  inode_mkdir\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1115,7 +1120,7 @@ static int hook_inode_rmdir(struct inode *dir,struct dentry *dentry){
 
     pr_alert("judge:PID %d  inode_rmdir\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1129,7 +1134,7 @@ static int hook_inode_mknod(struct inode *dir,struct dentry *dentry,umode_t mode
 
     pr_alert("judge:PID %d  inode_mknod\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1143,7 +1148,7 @@ static int hook_inode_rename(struct inode *old_dir,struct dentry *old_dentry,str
 
     pr_alert("judge:PID %d  inode_rename\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1157,7 +1162,7 @@ static int hook_inode_readlink(struct dentry *dentry){
 
     pr_alert("judge:PID %d  inode_readlink\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1171,7 +1176,7 @@ static int hook_inode_readlink(struct dentry *dentry){
 
   pr_alert("judge:PID %d  inode_follow_link\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -1185,7 +1190,7 @@ static int hook_inode_setattr(struct dentry *dentry,struct iattr *attr){
 
     pr_alert("judge:PID %d  inode_setattr\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1199,7 +1204,7 @@ static int hook_inode_setattr(struct dentry *dentry,struct iattr *attr){
 
   pr_alert("judge:PID %d  inode_getattr\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -1213,7 +1218,7 @@ static int hook_inode_setxattr(struct dentry *dentry,const char *name,const void
 
     pr_alert("judge:PID %d  inode_setxattr\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1227,7 +1232,7 @@ static int hook_inode_getxattr(struct dentry *dentry,const char *name){
 
     pr_alert("judge:PID %d  inode_getxattr\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1241,7 +1246,7 @@ static int hook_inode_listxattr(struct dentry *dentry){
 
     pr_alert("judge:PID %d  inode_listxattr\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1255,7 +1260,7 @@ static int hook_inode_removexattr(struct dentry *dentry,const char *name){
 
     pr_alert("judge:PID %d  inode_removexattr\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1269,7 +1274,7 @@ static int hook_inode_need_killpriv(struct dentry *dentry){
 
     pr_alert("judge:PID %d  inode_need_killpriv\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1283,7 +1288,7 @@ static int hook_inode_killpriv(struct dentry *dentry){
 
     pr_alert("judge:PID %d  inode_killpriv\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1297,7 +1302,7 @@ static int hook_inode_getsecurity(const struct inode *inode,const char *name,voi
 
     pr_alert("judge:PID %d  inode_getsecurity\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1311,7 +1316,7 @@ static int hook_inode_setsecurity(struct inode *inode,const char *name,const voi
 
     pr_alert("judge:PID %d  inode_setsecurity\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1325,7 +1330,7 @@ static int hook_inode_listsecurity(struct inode *inode,char *buffer,size_t buffe
 
     pr_alert("judge:PID %d  inode_listsecurity\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1339,7 +1344,7 @@ static int hook_inode_listsecurity(struct inode *inode,char *buffer,size_t buffe
 
   pr_alert("judge:PID %d  file_alloc_security\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -1353,7 +1358,7 @@ static int hook_file_ioctl(struct file *file,unsigned int cmd,unsigned long arg)
 
     pr_alert("judge:PID %d  file_ioctl\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1367,7 +1372,7 @@ static int hook_file_ioctl(struct file *file,unsigned int cmd,unsigned long arg)
 
   pr_alert("judge:PID %d  mmap_addr\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -1381,7 +1386,7 @@ static int hook_file_ioctl(struct file *file,unsigned int cmd,unsigned long arg)
 
   pr_alert("judge:PID %d  mmap_file\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -1395,7 +1400,7 @@ static int hook_file_ioctl(struct file *file,unsigned int cmd,unsigned long arg)
 
   pr_alert("judge:PID %d  file_mprotect\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -1409,7 +1414,7 @@ static int hook_file_lock(struct file *file,unsigned int cmd){
 
     pr_alert("judge:PID %d  file_lock\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1423,7 +1428,7 @@ static int hook_file_fcntl(struct file *file,unsigned int cmd,unsigned long arg)
 
     pr_alert("judge:PID %d  file_fcntl\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1437,7 +1442,7 @@ static int hook_file_set_fowner(struct file *file){
 
     pr_alert("judge:PID %d  file_set_fowner\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1451,7 +1456,7 @@ static int hook_file_send_sigiotask(struct task_struct *tsk,struct fown_struct *
 
     pr_alert("judge:PID %d  file_send_sigiotask\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1465,7 +1470,7 @@ static int hook_file_receive(struct file *file){
 
     pr_alert("judge:PID %d  file_receive\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1479,7 +1484,7 @@ static int hook_task_create(unsigned long clone_flags){
 
     pr_alert("judge:PID %d  task_create\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1493,7 +1498,7 @@ static int hook_cred_alloc_blank(struct cred *cred,gfp_t gfp){
 
     pr_alert("judge:PID %d  cred_alloc_blank\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1507,7 +1512,7 @@ static int hook_cred_alloc_blank(struct cred *cred,gfp_t gfp){
 
   pr_alert("judge:PID %d  cred_prepare\n",current->tgid);
 
-  info->state = JUDGE_RF;
+  info->status = JUDGE_RF;
   send_sig(SIGKILL,current,0);
   return -EACCES;
   }*/
@@ -1521,7 +1526,7 @@ static int hook_kernel_act_as(struct cred *new,u32 secid){
 
     pr_alert("judge:PID %d  kernel_act_as\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1535,7 +1540,7 @@ static int hook_kernel_create_files_as(struct cred *new,struct inode *inode){
 
     pr_alert("judge:PID %d  kernel_create_files_as\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1549,7 +1554,7 @@ static int hook_kernel_module_request(char *kmod_name){
 
     pr_alert("judge:PID %d  kernel_module_request\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1563,7 +1568,7 @@ static int hook_task_fix_setuid(struct cred *new,const struct cred *old,int flag
 
     pr_alert("judge:PID %d  task_fix_setuid\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1577,7 +1582,7 @@ static int hook_task_setpgid(struct task_struct *p,pid_t pgid){
 
     pr_alert("judge:PID %d  task_setpgid\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1591,7 +1596,7 @@ static int hook_task_getpgid(struct task_struct *p){
 
     pr_alert("judge:PID %d  task_getpgid\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1605,7 +1610,7 @@ static int hook_task_getsid(struct task_struct *p){
 
     pr_alert("judge:PID %d  task_getsid\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1619,7 +1624,7 @@ static int hook_task_setnice(struct task_struct *p,int nice){
 
     pr_alert("judge:PID %d  task_setnice\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1633,7 +1638,7 @@ static int hook_task_setioprio(struct task_struct *p,int ioprio){
 
     pr_alert("judge:PID %d  task_setioprio\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1647,7 +1652,7 @@ static int hook_task_getioprio(struct task_struct *p){
 
     pr_alert("judge:PID %d  task_getioprio\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1661,7 +1666,7 @@ static int hook_task_setrlimit(struct task_struct *p,unsigned int resource,struc
 
     pr_alert("judge:PID %d  task_setrlimit\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1675,7 +1680,7 @@ static int hook_task_setscheduler(struct task_struct *p){
 
     pr_alert("judge:PID %d  task_setscheduler\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1689,7 +1694,7 @@ static int hook_task_getscheduler(struct task_struct *p){
 
     pr_alert("judge:PID %d  task_getscheduler\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1703,7 +1708,7 @@ static int hook_task_movememory(struct task_struct *p){
 
     pr_alert("judge:PID %d  task_movememory\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1717,7 +1722,7 @@ static int hook_task_kill(struct task_struct *p,struct siginfo *siginfo,int sig,
 
     pr_alert("judge:PID %d  task_kill\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1731,7 +1736,7 @@ static int hook_task_wait(struct task_struct *p){
 
     pr_alert("judge:PID %d  task_wait\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1745,7 +1750,7 @@ static int hook_task_prctl(int option,unsigned long arg2,unsigned long arg3,unsi
 
     pr_alert("judge:PID %d  task_prctl\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1759,7 +1764,7 @@ static int hook_ipc_permission(struct kern_ipc_perm *ipcp,short flag){
 
     pr_alert("judge:PID %d  ipc_permission\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1773,7 +1778,7 @@ static int hook_msg_msg_alloc_security(struct msg_msg *msg){
 
     pr_alert("judge:PID %d  msg_msg_alloc_security\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1787,7 +1792,7 @@ static int hook_msg_queue_alloc_security(struct msg_queue *msq){
 
     pr_alert("judge:PID %d  msg_queue_alloc_security\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1801,7 +1806,7 @@ static int hook_msg_queue_associate(struct msg_queue *msq,int msqflg){
 
     pr_alert("judge:PID %d  msg_queue_associate\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1815,7 +1820,7 @@ static int hook_msg_queue_msgctl(struct msg_queue *msq,int cmd){
 
     pr_alert("judge:PID %d  msg_queue_msgctl\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1829,7 +1834,7 @@ static int hook_msg_queue_msgsnd(struct msg_queue *msq,struct msg_msg *msg,int m
 
     pr_alert("judge:PID %d  msg_queue_msgsnd\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1843,7 +1848,7 @@ static int hook_msg_queue_msgrcv(struct msg_queue *msq,struct msg_msg *msg,struc
 
     pr_alert("judge:PID %d  msg_queue_msgrcv\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1857,7 +1862,7 @@ static int hook_shm_alloc_security(struct shmid_kernel *shp){
 
     pr_alert("judge:PID %d  shm_alloc_security\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1871,7 +1876,7 @@ static int hook_shm_associate(struct shmid_kernel *shp,int shmflg){
 
     pr_alert("judge:PID %d  shm_associate\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1885,7 +1890,7 @@ static int hook_shm_shmctl(struct shmid_kernel *shp,int cmd){
 
     pr_alert("judge:PID %d  shm_shmctl\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1899,7 +1904,7 @@ static int hook_shm_shmat(struct shmid_kernel *shp,char __user *shmaddr,int shmf
 
     pr_alert("judge:PID %d  shm_shmat\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1913,7 +1918,7 @@ static int hook_sem_alloc_security(struct sem_array *sma){
 
     pr_alert("judge:PID %d  sem_alloc_security\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1927,7 +1932,7 @@ static int hook_sem_associate(struct sem_array *sma,int semflg){
 
     pr_alert("judge:PID %d  sem_associate\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1941,7 +1946,7 @@ static int hook_sem_semctl(struct sem_array *sma,int cmd){
 
     pr_alert("judge:PID %d  sem_semctl\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1955,7 +1960,7 @@ static int hook_sem_semop(struct sem_array *sma,struct sembuf *sops,unsigned nso
 
     pr_alert("judge:PID %d  sem_semop\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1969,7 +1974,7 @@ static int hook_netlink_send(struct sock *sk,struct sk_buff *skb){
 
     pr_alert("judge:PID %d  netlink_send\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1983,7 +1988,7 @@ static int hook_getprocattr(struct task_struct *p,char *name,char **value){
 
     pr_alert("judge:PID %d  getprocattr\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -1997,7 +2002,7 @@ static int hook_setprocattr(struct task_struct *p,char *name,void *value,size_t 
 
     pr_alert("judge:PID %d  setprocattr\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2011,7 +2016,7 @@ static int hook_secid_to_secctx(u32 secid,char **secdata,u32 *seclen){
 
     pr_alert("judge:PID %d  secid_to_secctx\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2025,7 +2030,7 @@ static int hook_secctx_to_secid(const char *secdata,u32 seclen,u32 *secid){
 
     pr_alert("judge:PID %d  secctx_to_secid\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2039,7 +2044,7 @@ static int hook_inode_notifysecctx(struct inode *inode,void *ctx,u32 ctxlen){
 
     pr_alert("judge:PID %d  inode_notifysecctx\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2053,7 +2058,7 @@ static int hook_inode_setsecctx(struct dentry *dentry,void *ctx,u32 ctxlen){
 
     pr_alert("judge:PID %d  inode_setsecctx\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2067,7 +2072,7 @@ static int hook_inode_getsecctx(struct inode *inode,void **ctx,u32 *ctxlen){
 
     pr_alert("judge:PID %d  inode_getsecctx\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2081,7 +2086,7 @@ static int hook_unix_stream_connect(struct sock *sock,struct sock *other,struct 
 
     pr_alert("judge:PID %d  unix_stream_connect\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2095,7 +2100,7 @@ static int hook_unix_may_send(struct socket *sock,struct socket *other){
 
     pr_alert("judge:PID %d  unix_may_send\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2109,7 +2114,7 @@ static int hook_socket_create(int family,int type,int protocol,int kern){
 
     pr_alert("judge:PID %d  socket_create\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2123,7 +2128,7 @@ static int hook_socket_post_create(struct socket *sock,int family,int type,int p
 
     pr_alert("judge:PID %d  socket_post_create\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2137,7 +2142,7 @@ static int hook_socket_bind(struct socket *sock,struct sockaddr *address,int add
 
     pr_alert("judge:PID %d  socket_bind\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2151,7 +2156,7 @@ static int hook_socket_connect(struct socket *sock,struct sockaddr *address,int 
 
     pr_alert("judge:PID %d  socket_connect\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2165,7 +2170,7 @@ static int hook_socket_listen(struct socket *sock,int backlog){
 
     pr_alert("judge:PID %d  socket_listen\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2179,7 +2184,7 @@ static int hook_socket_accept(struct socket *sock,struct socket *newsock){
 
     pr_alert("judge:PID %d  socket_accept\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2193,7 +2198,7 @@ static int hook_socket_sendmsg(struct socket *sock,struct msghdr *msg,int size){
 
     pr_alert("judge:PID %d  socket_sendmsg\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2207,7 +2212,7 @@ static int hook_socket_recvmsg(struct socket *sock,struct msghdr *msg,int size,i
 
     pr_alert("judge:PID %d  socket_recvmsg\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2221,7 +2226,7 @@ static int hook_socket_getsockname(struct socket *sock){
 
     pr_alert("judge:PID %d  socket_getsockname\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2235,7 +2240,7 @@ static int hook_socket_getpeername(struct socket *sock){
 
     pr_alert("judge:PID %d  socket_getpeername\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2249,7 +2254,7 @@ static int hook_socket_getsockopt(struct socket *sock,int level,int optname){
 
     pr_alert("judge:PID %d  socket_getsockopt\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2263,7 +2268,7 @@ static int hook_socket_setsockopt(struct socket *sock,int level,int optname){
 
     pr_alert("judge:PID %d  socket_setsockopt\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2277,7 +2282,7 @@ static int hook_socket_shutdown(struct socket *sock,int how){
 
     pr_alert("judge:PID %d  socket_shutdown\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2291,7 +2296,7 @@ static int hook_socket_sock_rcv_skb(struct sock *sk,struct sk_buff *skb){
 
     pr_alert("judge:PID %d  socket_sock_rcv_skb\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2305,7 +2310,7 @@ static int hook_socket_getpeersec_stream(struct socket *sock,char __user *optval
 
     pr_alert("judge:PID %d  socket_getpeersec_stream\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2319,7 +2324,7 @@ static int hook_socket_getpeersec_dgram(struct socket *sock,struct sk_buff *skb,
 
     pr_alert("judge:PID %d  socket_getpeersec_dgram\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2333,7 +2338,7 @@ static int hook_sk_alloc_security(struct sock *sk,int family,gfp_t priority){
 
     pr_alert("judge:PID %d  sk_alloc_security\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2347,7 +2352,7 @@ static int hook_inet_conn_request(struct sock *sk,struct sk_buff *skb,struct req
 
     pr_alert("judge:PID %d  inet_conn_request\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2361,7 +2366,7 @@ static int hook_secmark_relabel_packet(u32 secid){
 
     pr_alert("judge:PID %d  secmark_relabel_packet\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2375,7 +2380,7 @@ static int hook_tun_dev_create(void){
 
     pr_alert("judge:PID %d  tun_dev_create\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2389,7 +2394,7 @@ static int hook_tun_dev_attach(struct sock *sk){
 
     pr_alert("judge:PID %d  tun_dev_attach\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2403,7 +2408,7 @@ static int hook_key_alloc(struct key *key,const struct cred *cred,unsigned long 
 
     pr_alert("judge:PID %d  key_alloc\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2417,7 +2422,7 @@ static int hook_key_permission(key_ref_t key_ref,const struct cred *cred,key_per
 
     pr_alert("judge:PID %d  key_permission\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2431,7 +2436,7 @@ static int hook_key_getsecurity(struct key *key,char **_buffer){
 
     pr_alert("judge:PID %d  key_getsecurity\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2445,7 +2450,7 @@ static int hook_audit_rule_init(u32 field,u32 op,char *rulestr,void **lsmrule){
 
     pr_alert("judge:PID %d  audit_rule_init\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2459,7 +2464,7 @@ static int hook_audit_rule_known(struct audit_krule *krule){
 
     pr_alert("judge:PID %d  audit_rule_known\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }
@@ -2473,7 +2478,7 @@ static int hook_audit_rule_match(u32 secid,u32 field,u32 op,void *lsmrule,struct
 
     pr_alert("judge:PID %d  audit_rule_match\n",current->tgid);
 
-    info->state = JUDGE_RF;
+    info->status = JUDGE_RF;
     send_sig(SIGKILL,current,0);
     return -EACCES;
 }

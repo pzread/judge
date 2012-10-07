@@ -20,7 +20,8 @@ struct proc_info{
     struct file *pin;
     struct file *pout;
     char path[PATH_MAX + 1];
-    int state;
+    int status;
+    unsigned long memlimit;
     unsigned long peakmem;
 };
 

@@ -4,7 +4,7 @@ struct judge_submit_info{
 
     int submitid;
     int proid;
-    int state[JUDGE_SET_COUNTMAX];
+    int status[JUDGE_SET_COUNTMAX];
     int score[JUDGE_SET_COUNTMAX];
     unsigned long runtime[JUDGE_SET_COUNTMAX];
     unsigned long peakmem[JUDGE_SET_COUNTMAX];
@@ -22,6 +22,7 @@ static int server_updatedb(struct judge_submit_info *submit_info,struct judge_se
 static void* server_thread(void *arg);
 int judge_server();
 
+static MYSQL server_sqli;
 static struct judge_submit_info server_queue_head;
 static sem_t server_queue_sem;
 static pthread_mutex_t server_queue_mutex;

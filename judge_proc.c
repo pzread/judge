@@ -68,7 +68,7 @@ struct judge_proc_info* judge_proc_create(char *abspath,char *path,char *sopath,
 	    j++;
 	}
     }
-    proc_info->state = JUDGE_ERR;
+    proc_info->status = JUDGE_ERR;
     proc_info->name[j] = '\0';
     proc_info->pid = -1;
     proc_info->task = -1;
@@ -118,13 +118,14 @@ static int proc_protect(struct judge_proc_info *proc_info){
     limit.rlim_max = limit.rlim_cur;
     prlimit(proc_info->pid,RLIMIT_CPU,&limit,NULL);
 
-    limit.rlim_cur = proc_info->memlimit * 1024L + 4096L * 128L;
+    /*limit.rlim_cur = proc_info->memlimit * 1024L + 4096L * 128L;
     limit.rlim_max = limit.rlim_cur;
-    prlimit(proc_info->pid,RLIMIT_AS,&limit,NULL);
+    prlimit(proc_info->pid,RLIMIT_AS,&limit,NULL);*/
 
     com_proc_add.path[0] = '\0';
     strncat(com_proc_add.path,proc_info->path,sizeof(com_proc_add.path));
     com_proc_add.pid = proc_info->pid;
+    com_proc_add.memlimit = proc_info->memlimit * 1024L + 4096L * 128L;
     if(ioctl(judge_modfd,IOCTL_PROC_ADD,&com_proc_add)){
 	return -1;
     }
@@ -136,11 +137,13 @@ int judge_proc_run(struct judge_proc_info *proc_info){
     int ret;
 
     struct judge_check_info *check_info;
-    int waitstate;
+    int waitstatus;
     struct judge_com_proc_get com_proc_get;
         
     check_info = proc_info->check_info;
     ret = 0;
+
+    printf("proc1\n");
 
     if((proc_info->pid = fork()) == 0){
 	char *argv[] = {NULL,NULL};
@@ -157,19 +160,25 @@ int judge_proc_run(struct judge_proc_info *proc_info){
 	execve(proc_info->path,argv,envp);
     }
 
+    printf("proc2\n");
+
     if(proc_info->pid == -1){
 	ret = -1;
 	goto clean;
     }
     waitpid(proc_info->pid,NULL,WUNTRACED);
 
+    printf("proc3\n");
+
     if(proc_protect(proc_info)){
 	ret = -1;
 	goto clean;
     }
 
+    printf("proc4\n");
+
     kill(proc_info->pid,SIGCONT);
-    if(waitpid(proc_info->pid,&waitstate,0) == -1){
+    if(waitpid(proc_info->pid,&waitstatus,0) == -1){
 	ret = -1;
 	goto clean;
     }
@@ -180,22 +189,26 @@ int judge_proc_run(struct judge_proc_info *proc_info){
 	goto clean;
     }
 
+    printf("proc5\n");
+
     proc_info->runtime = com_proc_get.runtime;
     proc_info->peakmem = com_proc_get.peakmem;
 
-    if(com_proc_get.state != JUDGE_AC){
-	proc_info->state = com_proc_get.state;
+    if(com_proc_get.status != JUDGE_AC){
+	proc_info->status = com_proc_get.status;
     }else if(proc_info->peakmem > (proc_info->memlimit * 1024L)){
-	proc_info->state = JUDGE_MLE;
+	proc_info->status = JUDGE_MLE;
     }else if(proc_info->runtime > (proc_info->timelimit * 1000L)){
-	proc_info->state = JUDGE_TLE;
-    }else if(!WIFEXITED(waitstate)){
-	proc_info->state = JUDGE_RE;
-    }else if(WEXITSTATUS(waitstate) == JUDGE_RF){
-	proc_info->state = JUDGE_RF;
+	proc_info->status = JUDGE_TLE;
+    }else if(!WIFEXITED(waitstatus)){
+	proc_info->status = JUDGE_RE;
+    }else if(WEXITSTATUS(waitstatus) == JUDGE_RF){
+	proc_info->status = JUDGE_RF;
     }else{
-	proc_info->state = check_info->post_fn(check_info->data);
+	proc_info->status = check_info->post_fn(check_info->data);
     }
+
+    printf("proc6\n");
 
 clean:
 
@@ -206,6 +219,8 @@ clean:
 	ioctl(judge_modfd,IOCTL_PROC_DEL,proc_info->task);
     }
     check_info->clean_fn(check_info->data);
+
+    printf("proc7\n");
 
     return ret;
 }

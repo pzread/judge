@@ -6,10 +6,11 @@ struct judge_com_proc_add{
     char path[PATH_MAX + 1];
     unsigned long pid;
     unsigned long task;
+    unsigned long memlimit;
 };
 struct judge_com_proc_get{
     unsigned long task;
-    int state;
+    int status;
     unsigned long runtime;
     unsigned long peakmem;
 };

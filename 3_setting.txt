@@ -1,5 +1,0 @@
-[JUDGE]
-timelimit=3000
-memlimit=65536
-count=2
-score=100,50
