@@ -46,7 +46,7 @@ struct judge_proc_info* judge_proc_create(char *abspath,char *path,char *sopath,
     check_info->sopath[0] = '\0';
     strncat(check_info->sopath,sopath,sizeof(check_info->sopath));
 
-    if((check_info->sohandle = dlopen(check_info->sopath,RTLD_NOW)) == NULL){
+    if((check_info->sohandle = dlopen(check_info->sopath,RTLD_LAZY | RTLD_NODELETE)) == NULL){
 	goto error;
     }
     check_info->init_fn = dlsym(check_info->sohandle,"init_fn");
@@ -113,6 +113,10 @@ static int proc_protect(struct judge_proc_info *proc_info){
     limit.rlim_cur = 1;
     limit.rlim_max = limit.rlim_cur;
     prlimit(proc_info->pid,RLIMIT_NPROC,&limit,NULL);
+
+    limit.rlim_cur = 4L;
+    limit.rlim_max = limit.rlim_cur;
+    prlimit(proc_info->pid,RLIMIT_NOFILE,&limit,NULL);
 
     limit.rlim_cur = (proc_info->timelimit) / 1000L + 1L;
     limit.rlim_max = limit.rlim_cur;

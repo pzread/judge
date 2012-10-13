@@ -9,7 +9,7 @@ int main(int argc,char *argv[]){
 
     signal(SIGPIPE,SIG_IGN);
 
-    judge_modfd = open("/dev/judge",O_RDWR);
+    judge_modfd = open("/dev/judgm",O_RDWR);
     judge_server();
     close(judge_modfd);
 

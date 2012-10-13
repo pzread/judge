@@ -1,5 +1,5 @@
 ifneq ($(KERNELRELEASE),)
-	judgm-objs := judge_mod.o
+	judgm-objs := judgm_mod.o judgm_proc.o judgm_syscall.o judgm_syscall_asm.o judgm_security.o
 	obj-m := judgm.o
 else
 	KERNEL_SOURCE := /usr/lib/modules/$(shell uname -r)/build

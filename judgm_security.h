@@ -1,44 +1,13 @@
-static int __init mod_init(void);
-static void __exit mod_exit(void);
-static long mod_ioctl(struct file *file,unsigned int cmd,unsigned long arg);
+static unsigned long* security_get_addr(void);
 
-static dev_t mod_dev;
-static struct cdev mod_cdev;
-static struct class *mod_class;
-static struct file_operations mod_fops = {
-    .owner = THIS_MODULE,
-    .unlocked_ioctl = mod_ioctl
-};
-
-
-#define PROC_TASK_HTSIZE 1009
-
-struct proc_info{
-    struct hlist_node node;
-
-    struct task_struct *task;
-    struct file *pin;
-    struct file *pout;
-    char path[PATH_MAX + 1];
-    int status;
-    unsigned long memlimit;
-    unsigned long peakmem;
-};
-
-static struct proc_info* proc_task_lookup(struct task_struct *task);
-static int proc_get_path(char *in_path,char *real_path);
-static int proc_close_fd(struct task_struct *task);
-
-static struct hlist_head *proc_task_ht;
-static DEFINE_SPINLOCK(proc_task_htlock);
-static struct kmem_cache *proc_info_cachep;
-
-
-static unsigned long* hook_get_addr(void);
-
-static unsigned long *hook_addr;
+static unsigned long* security_hook_addr;
 static struct security_operations *ori_sops;
 static struct security_operations hook_sops;
+
+int judgm_security_hook(void);
+int judgm_security_unhook(void);
+
+extern struct judgm_proc_info* judgm_proc_task_lookup(struct task_struct *task);
 
 static int hook_ptrace_access_check(struct task_struct *child,unsigned int mode);
 static int hook_ptrace_traceme(struct task_struct *parent);

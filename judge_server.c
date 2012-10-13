@@ -44,6 +44,10 @@ static int server_compile(char *cpppath,char *exepath){
     
     if((pid = fork()) == 0){
 	char *argv[] = {"g++","-static","-O2",cpppath,"-o",exepath,NULL};
+
+	freopen("/dev/null","w",stdout);
+	freopen("/dev/null","w",stderr);
+
 	execvp("g++",argv);
     }
     waitpid(pid,&waitstatus,0);
@@ -53,7 +57,7 @@ static int server_compile(char *cpppath,char *exepath){
 
     return 0;
 }
-static int server_updatedb(struct judge_submit_info *submit_info,struct judge_setting_info *setting_info){
+static int server_updatedb(MYSQL *sqli,struct judge_submit_info *submit_info,struct judge_setting_info *setting_info){
     int i;
     int j;
 
@@ -100,11 +104,11 @@ static int server_updatedb(struct judge_submit_info *submit_info,struct judge_se
 
     printf("sql2\n");
 
-    sqlbuf = malloc(16384);
+    sqlbuf = malloc(8192);
 
-    snprintf(sqlbuf,16384,"UPDATE submit SET status='%s',score='%s',runtime='%s',peakmem='%s' WHERE submitid='%d'",sqlstatus,sqlscore,sqlruntime,sqlpeakmem,submit_info->submitid);
+    snprintf(sqlbuf,8192,"UPDATE submit SET status='%s',score='%s',runtime='%s',peakmem='%s' WHERE submitid='%d'",sqlstatus,sqlscore,sqlruntime,sqlpeakmem,submit_info->submitid);
 
-    mysql_real_query(&server_sqli,sqlbuf,strlen(sqlbuf));
+    mysql_real_query(sqli,sqlbuf,strlen(sqlbuf));
 
     printf("sql3\n");
 
@@ -125,6 +129,14 @@ static void* server_thread(void *arg){
     char abspath[PATH_MAX + 1];
     struct judge_setting_info setting_info;
     struct judge_proc_info *proc_info;
+
+    MYSQL sqli;
+    my_bool reconn;
+
+    mysql_init(&sqli);
+    reconn = 1;
+    mysql_options(&sqli,MYSQL_OPT_RECONNECT,&reconn);
+    mysql_real_connect(&sqli,"127.0.0.1","xxxxx","xxxxx","expoj",0,NULL,0);
 
     while(1){
 	printf("in\n");
@@ -176,6 +188,7 @@ static void* server_thread(void *arg){
 		    submit_info->status[i] = JUDGE_ERR;
 		    continue;
 		}
+		submit_info->status[i] = JUDGE_ERR;
 
 		printf("thr3\n");
 
@@ -193,12 +206,14 @@ static void* server_thread(void *arg){
 	}
 
 	printf("%d %lu %lu\n",submit_info->status[0],submit_info->runtime[0],submit_info->peakmem[0]);
-	server_updatedb(submit_info,&setting_info);
+	server_updatedb(&sqli,submit_info,&setting_info);
 
 	free(submit_info);
 
 	printf("out\n");
     }
+
+    mysql_close(&sqli);
 
     return NULL;
 }
@@ -216,9 +231,7 @@ int judge_server(){
     int submitid;
     int proid;
     struct judge_submit_info *submit_info;
-
-    mysql_init(&server_sqli);
-    mysql_real_connect(&server_sqli,"127.0.0.1","user","xxxxxx","xxxxxx",0,NULL,0);
+    
     server_queue_head.next = &server_queue_head;
     server_queue_head.prev = &server_queue_head;
     sem_init(&server_queue_sem,0,0);
@@ -256,8 +269,6 @@ int judge_server(){
 	sem_post(&server_queue_sem);
     }
     free(buf);
-
-    mysql_close(&server_sqli);
 
     return 0;
 }

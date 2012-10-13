@@ -18,14 +18,14 @@ struct judge_setting_info{
 
 static void server_inihandler(void *data,char *section,char *key,char *value);
 static int server_compile(char *cpppath,char *exepath);
-static int server_updatedb(struct judge_submit_info *submit_info,struct judge_setting_info *setting_info);
+static int server_updatedb(MYSQL *sqli,struct judge_submit_info *submit_info,struct judge_setting_info *setting_info);
 static void* server_thread(void *arg);
-int judge_server();
 
-static MYSQL server_sqli;
 static struct judge_submit_info server_queue_head;
 static sem_t server_queue_sem;
 static pthread_mutex_t server_queue_mutex;
+
+int judge_server();
 
 extern struct judge_proc_info* judge_proc_create(char *abspath,char *path,char *sopath,unsigned long timelimit,unsigned long memlimit);
 extern int judge_proc_free(struct judge_proc_info *proc_info);
