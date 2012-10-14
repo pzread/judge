@@ -1,4 +1,4 @@
 judge9
 =====
 
-judge server edition on Linux
+judge server on Linux x86_64
