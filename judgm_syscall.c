@@ -1,10 +1,10 @@
 #include<linux/fs.h>
 #include<linux/sched.h>
 #include<linux/slab.h>
+#include<linux/sort.h>
 #include<asm/msr.h>
 #include<asm/unistd.h>
 #include<asm/uaccess.h>
-#include<asm/atomic.h>
 
 #include"judgm_syscall.h"
 #include"judgm.h"
@@ -12,11 +12,10 @@
 
 int judgm_syscall_hook(){
     int i;
+    int j;
     
     syscall_init_hook();
 
-    atomic64_set(&syscall_pending,0L);
-    
     __asm(
 	"cli\n"
 	"push %rax\n"
@@ -26,10 +25,12 @@ int judgm_syscall_hook(){
 	"pop %rax\n"
     );
 
-    for(i = 0;i < syscall_max;i++){
+    for(i = 0,j = 0;i < syscall_max;i++){
+	if(i == syscall_whitelist[j]){
+	    j++;
+	    continue;
+	}
 	syscall_table[i] = (unsigned long)hook_sys_block;
-    //ori_sys_nanosleep = (func_sys_nanosleep)syscall_table[__NR_nanosleep];
-    //syscall_table[__NR_nanosleep] = (unsigned long)hook_sys_block;
     }
 
     __asm(
@@ -42,7 +43,6 @@ int judgm_syscall_hook(){
     );
 
     pr_alert("%p\n",syscall_table);
-    pr_alert("%p\n",ori_sys_nanosleep);
     pr_alert("%p\n",hook_sys_block);
 
     return 0;
@@ -68,15 +68,10 @@ int judgm_syscall_unhook(){
 	"sti\n"
     );
 
-    schedule_timeout_interruptible(HZ);
-    while(atomic64_read(&syscall_pending) > 0L){
-	pr_alert("judgm:Wait\n");
-	schedule_timeout_interruptible(HZ);
-    }
+    schedule_timeout_interruptible(3 * HZ);
 
     return 0;
 }
-
 static int syscall_init_hook(){
     int i;
 
@@ -111,8 +106,20 @@ static int syscall_init_hook(){
     judgm_syscall_ori_table = kmalloc(sizeof(unsigned long) * (syscall_max + 1),GFP_KERNEL);
     memcpy(judgm_syscall_ori_table,syscall_table,sizeof(unsigned long) * syscall_max);
 
+    sort(syscall_whitelist,SYSCALL_WHITELIST_SIZE,sizeof(unsigned int),syscall_whitelist_cmp,NULL);
+
     return 0;
 }
+static int syscall_whitelist_cmp(const void *a,const void *b){
+    if(*(unsigned int*)a < *(unsigned int*)b){
+	return -1;
+    }else if(*(unsigned int*)a == *(unsigned int*)b){
+	return 0;
+    }else{
+	return 1;
+    }
+}
+
 int judgm_syscall_check(){
     if(judgm_proc_task_lookup(current)){
 	return 1;
@@ -131,7 +138,7 @@ int judgm_syscall_block(){
     return 0;
 }
 
-asmlinkage long hook_sys_nanosleep(struct timespec __user *rqtp,struct timespec __user *rmtp){
+/*asmlinkage long hook_sys_nanosleep(struct timespec __user *rqtp,struct timespec __user *rmtp){
     long ret;
 
     struct judgm_proc_info *info;
@@ -152,4 +159,4 @@ asmlinkage long hook_sys_nanosleep(struct timespec __user *rqtp,struct timespec 
 
     atomic64_dec(&syscall_pending);
     return -EACCES;
-}
+}*/
