@@ -1,24 +1,14 @@
+typedef int (*line_run_fn)(struct judgx_line_info *line_info);
+
 struct judge_submit_info{
     struct judge_submit_info *next;
     struct judge_submit_info *prev;
 
     int submitid;
     int proid;
-    int status[JUDGE_SET_COUNTMAX];
-    int score[JUDGE_SET_COUNTMAX];
-    unsigned long runtime[JUDGE_SET_COUNTMAX];
-    unsigned long peakmem[JUDGE_SET_COUNTMAX];
-};
-struct judge_setting_info{
-    unsigned long timelimit;
-    unsigned long memlimit;
-    int count;
-    int score[JUDGE_SET_COUNTMAX];
 };
 
-static void server_inihandler(void *data,char *section,char *key,char *value);
-static int server_compile(char *cpppath,char *exepath);
-static int server_updatedb(MYSQL *sqli,struct judge_submit_info *submit_info,struct judge_setting_info *setting_info);
+static int server_updatedb(MYSQL *sqli,int submitid,int result_count,struct judgx_line_result *result);
 static void* server_thread(void *arg);
 
 static struct judge_submit_info server_queue_head;

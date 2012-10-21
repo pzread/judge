@@ -6,79 +6,119 @@
 #include<asm/unistd.h>
 #include<asm/uaccess.h>
 
-#include"judgm_syscall.h"
+#include"judge_def.h"
 #include"judgm.h"
-#include"judge_com.h"
+#include"judgx_com.h"
+#include"judgm_syscall.h"
 
 int judgm_syscall_hook(){
     int i;
     int j;
-    
+
+    unsigned int size;
+    unsigned int restore;
+
     syscall_init_hook();
-
-    __asm(
-	"cli\n"
-	"push %rax\n"
-	"mov %cr0,%rax\n"
-	"and $0xfffffffffffeffff,%rax\n"
-	"mov %rax,%cr0\n"
-	"pop %rax\n"
-    );
-
+   
+    syscall_addr_write((unsigned long)syscall_table,&size,&restore);
     for(i = 0,j = 0;i < syscall_max;i++){
+	if(size == 0){
+	    syscall_addr_restore((unsigned long)(syscall_table + i - 1),restore);
+	    syscall_addr_write((unsigned long)(syscall_table + i),&size,&restore);
+	}
+	size -= sizeof(unsigned long);
+
 	if(i == syscall_whitelist[j]){
 	    j++;
 	    continue;
 	}
 	syscall_table[i] = (unsigned long)hook_sys_block;
     }
-
-    __asm(
-	"push %rax\n"
-	"mov %cr0,%rax\n"
-	"or $0x10000,%rax\n"
-	"mov %rax,%cr0\n"
-	"pop %rax\n"
-	"sti\n"
-    );
-
-    pr_alert("%p\n",syscall_table);
-    pr_alert("%p\n",hook_sys_block);
+    syscall_addr_restore((unsigned long)(&syscall_table[i - 1]),restore);
 
     return 0;
 }
 int judgm_syscall_unhook(){
-    __asm(
-	"cli\n"
-	"push %rax\n"
-	"mov %cr0,%rax\n"
-	"and $0xfffffffffffeffff,%rax\n"
-	"mov %rax,%cr0\n"
-	"pop %rax\n"
-    );
+    int i;
 
-    memcpy(syscall_table,judgm_syscall_ori_table,sizeof(unsigned long) * syscall_max);
+    unsigned int size;
+    unsigned int restore;
 
-    __asm(
-	"push %rax\n"
-	"mov %cr0,%rax\n"
-	"or $0x10000,%rax\n"
-	"mov %rax,%cr0\n"
-	"pop %rax\n"
-	"sti\n"
-    );
+    syscall_addr_write((unsigned long)syscall_table,&size,&restore);
+    for(i = 0;i < syscall_max;i++){
+	if(size == 0){
+	    syscall_addr_restore((unsigned long)(&syscall_table[i - 1]),restore);
+	    syscall_addr_write((unsigned long)(&syscall_table[i]),&size,&restore);
+	}
+	size -= sizeof(unsigned long);
+
+	syscall_table[i] = (unsigned long)judgm_syscall_ori_table[i];
+    }
+    syscall_addr_restore((unsigned long)(&syscall_table[i - 1]),restore);
 
     schedule_timeout_interruptible(3 * HZ);
-
     return 0;
 }
 static int syscall_init_hook(){
+    ssize_t ret;
     int i;
+    int j;
 
+    struct file *f;
+    char line[128];
     unsigned char code[3] = {0xff,0x14,0xc5};
     unsigned long addr;
 
-    addr = native_read_msr(MSR_LSTAR);
+    f = filp_open("/proc/kallsyms",O_RDONLY,0);
+    set_fs(KERNEL_DS);
+
+    i = 0;
+    addr = 0;
+    while(true){
+	ret = f->f_op->read(f,&line[i],1,&f->f_pos);
+
+	if(line[i] == '\n' || ret <= 0){
+	    line[i] = '\0';
+
+	    addr = 0;
+	    for(j = 0;j < i;j++){
+		if(line[j] == ' '){
+		    j++;
+		    break;
+		}
+
+		addr *= 16UL;
+		if(line[j] >= '0' && line[j] <= '9'){
+		    addr += (unsigned long)(line[j] - '0');
+		}else{
+		    addr += (unsigned long)(line[j] - 'a' + 10);
+		}
+	    }
+	    for(;j < i;j++){
+		if(line[j] == ' '){
+		    j++;
+		    break;
+		}
+	    }
+	    if(j < i){
+		if(strcmp("system_call",line + j) == 0){
+		    break;
+		}
+	    }
+
+	    i = 0;
+	}else{
+	    i++;
+	}
+
+	if(ret <= 0){
+	    break;
+	}
+    }
+
+    set_fs(USER_DS);
+    filp_close(f,NULL);
+
     while(true){
 	for(i = 0;i < 3;i++){
 	    if(*(unsigned char*)addr != code[i]){
@@ -118,6 +158,44 @@ static int syscall_whitelist_cmp(const void *a,const void *b){
     }else{
 	return 1;
     }
+}
+static int syscall_addr_write(unsigned long addr,unsigned int *size,int *restore){
+    unsigned int level;
+    pte_t *pte;
+
+    pte = lookup_address(addr,&level);
+    if(pte->pte & _PAGE_RW){
+	*restore = 0;
+    }else{
+	pte->pte |= _PAGE_RW;
+	*restore = 1;
+    }
+
+    switch(level){
+	case PG_LEVEL_4K:
+	    *size = 4096;
+	    break;
+	case PG_LEVEL_2M:
+	    *size = 2097152 ;
+	    break;
+	case PG_LEVEL_1G:
+	    *size = 1073741824;
+	    break;
+    }
+    *size -= (((unsigned int)addr) & (*size - 1));
+
+    return 0;
+}
+static int syscall_addr_restore(unsigned long addr,int restore){
+    unsigned int level;
+    pte_t *pte;
+
+    if(restore){
+	pte = lookup_address(addr,&level);
+	pte->pte ^= _PAGE_RW;
+    }
+
+    return 0;
 }
 
 int judgm_syscall_check(){

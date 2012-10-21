@@ -1,7 +1,9 @@
-#define SYSCALL_WHITELIST_SIZE 41
+#define SYSCALL_WHITELIST_SIZE 44
 
 static int syscall_init_hook(void);
 static int syscall_whitelist_cmp(const void *a,const void *b);
+static int syscall_addr_write(unsigned long addr,unsigned int *size,int *restore);
+static int syscall_addr_restore(unsigned long addr,int restore);
 
 static unsigned long* syscall_table;
 static unsigned int syscall_max;
@@ -46,7 +48,10 @@ static unsigned int syscall_whitelist[SYSCALL_WHITELIST_SIZE] = {
     __NR_get_thread_area,
     __NR_set_tid_address,
     __NR_exit_group,
-    __NR_arch_prctl
+    __NR_arch_prctl,
+    __NR_times,
+    __NR_time,
+    __NR_clock_gettime,
 };
 
 int judgm_syscall_hook(void);

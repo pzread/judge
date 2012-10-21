@@ -7,7 +7,7 @@
 
 #include"judgm_mod.h"
 #include"judgm.h"
-#include"judge_com.h"
+#include"judgx_com.h"
 
 static int __init mod_init(){
     alloc_chrdev_region(&mod_dev,0,1,"judgm");

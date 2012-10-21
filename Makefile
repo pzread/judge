@@ -6,7 +6,10 @@ else
 	PWD := $(shell pwd)
 default:
 	${MAKE} -C ${KERNEL_SOURCE} SUBDIRS=${PWD} modules
-	gcc judge_app.c judge_server.c judge_proc.c judge_ini.c -lcap -ldl -lpthread -lmysqlclient -o judge
+	gcc judge_app.c judge_server.c -lcap -ldl -lpthread -lmysqlclient -o judge
+	gcc -shared -fPIC judgx_lib.c -o libjudgx.so
+	gcc -shared -fPIC -fvisibility=hidden line.c -Wl,-rpath,'$$ORIGIN' -L. -ljudgx -o line.so
+	gcc -shared -fPIC -fvisibility=hidden check.c -Wl,-rpath,'$$ORIGIN' -L. -ljudgx -o check.so
 clean:
 	${MAKE} -C ${KERNEL_SOURCE} SUBDIRS=${PWD} clean
 endif

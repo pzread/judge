@@ -3,9 +3,10 @@
 #include<linux/sched.h>
 #include<asm/uaccess.h>
 
-#include"judgm_security.h"
+#include"judge_def.h"
 #include"judgm.h"
-#include"judge_com.h"
+#include"judgx_com.h"
+#include"judgm_security.h"
 
 int judgm_security_hook(){
 
@@ -169,7 +170,8 @@ int judgm_security_unhook(){
 
 static unsigned long* security_get_addr(){
     ssize_t ret;
-    int i,j;
+    int i;
+    int j;
 
     struct file *f;
     char line[128];

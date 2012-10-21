@@ -5,14 +5,8 @@
 #include<signal.h>
 #include<pthread.h>
 
-#define JUDGE_ERR -1
-#define JUDGE_AC 0
-#define JUDGE_WA 1
-#define JUDGE_TLE 2
-#define JUDGE_MLE 3
-#define JUDGE_RF 4
-#define JUDGE_RE 5
-#define JUDGE_CE 6
+#include"judge_def.h"
+#include"judgx.h"
 
 struct check_info{
     int pin[2];
@@ -77,7 +71,7 @@ void* read_thread(void *arg){
     }
 }
 
-int init_fn(char *abspath,void **data){
+DLL_PUBLIC int init(char *datapath,void **data){
     struct check_info *info;
     char tpath[PATH_MAX + 1];
     int wpid;
@@ -86,9 +80,9 @@ int init_fn(char *abspath,void **data){
     info = malloc(sizeof(struct check_info));
     pipe(info->pin);
     pipe(info->pout);
-    snprintf(tpath,sizeof(tpath),"%s/in.txt",abspath);
+    snprintf(tpath,sizeof(tpath),"%s/in.txt",datapath);
     info->infd = open(tpath,O_RDONLY);
-    snprintf(tpath,sizeof(tpath),"%s/ans.txt",abspath);
+    snprintf(tpath,sizeof(tpath),"%s/ans.txt",datapath);
     info->ansfd = open(tpath,O_RDONLY);
     if(info->infd == -1 || info->ansfd == -1){
 	goto error;
@@ -113,7 +107,7 @@ error:
 
     return -1;
 }
-int run_fn(void *data){
+DLL_PUBLIC int run(void *data){
     struct check_info *info;
 
     info = (struct check_info*)data;
@@ -125,7 +119,7 @@ int run_fn(void *data){
 
     return 0;
 }
-int post_fn(void *data){
+DLL_PUBLIC int post(void *data){
     struct check_info *info;
     void *state;
 
@@ -139,7 +133,7 @@ int post_fn(void *data){
 
     return (unsigned long)state;
 }
-int clean_fn(void *data){
+DLL_PUBLIC int clean(void *data){
     struct check_info *info;
 
     info = (struct check_info*)data;

@@ -10,69 +10,124 @@
 #include<sys/resource.h>
 #include<sys/stat.h>
 
-#include"judge.h"
-#include"judge_proc.h"
-#include"judge_com.h"
+#include"judge_def.h"
+#include"judgx.h"
+#include"judgx_com.h"
+#include"judgx_lib.h"
 
-struct judge_proc_info* judge_proc_create(char *abspath,char *path,char *sopath,unsigned long timelimit,unsigned long memlimit){
+static __attribute__((constructor)) void judgx_init(){
+    judgx_modfd = open("/dev/judgm",O_RDWR);
+    return;
+}
+static __attribute__((destructor)) void judgx_exit(){
+    close(judgx_modfd);
+    return;
+}
+
+DLL_PUBLIC int judgx_ini_load(FILE *f,judgx_ini_handler handler,void *data){
+    int i;
+    int j;
+
+    char *buf;
+    int l;
+    char *section;
+    char *key;
+    char *value;
+
+    buf = malloc(1024);
+    section = malloc(1024);
+    key = malloc(1024);
+    value = malloc(1024);
+
+    while(fgets(buf,1024,f) != NULL){
+	l = strlen(buf);
+	if(buf[l - 1] == '\n'){
+	    buf[l - 1] = '\0';
+	}
+	if(buf[0] == '\0'){
+	    continue;
+	}
+	if(buf[0] == '['){
+	    for(i = 1,j = 0;i < l && buf[i] != ']';i++,j++){
+		section[j] = buf[i];
+	    }
+	    section[j] = '\0';
+	}else{
+	    for(i = 0,j = 0;i < l && buf[i] != '=';i++,j++){
+		key[j] = buf[i];
+	    }
+	    key[j] = '\0';
+	    for(i += 1,j = 0;i < l;i++,j++){
+		value[j] = buf[i];
+	    }
+	    value[j] = '\0';
+	    handler(data,section,key,value);
+	}
+    }
+
+    free(buf);
+    free(section);
+    free(key);
+    free(value);
+    
+    return 0;
+}
+
+DLL_PUBLIC int judgx_compile(char *cpppath,char *exepath,char *arg){
+    int pid;
+    int waitstatus;
+    
+    if((pid = fork()) == 0){
+	char *argv[] = {"g++","-static","-O2",cpppath,"-lrt","-o",exepath,NULL};
+
+	freopen("/dev/null","w",stdout);
+	freopen("/dev/null","w",stderr);
+
+	execvp("g++",argv);
+    }
+    waitpid(pid,&waitstatus,0);
+    if(waitstatus){
+	return JUDGE_CE;
+    }
+    return 0;
+}
+
+
+DLL_PUBLIC struct judgx_proc_info* judgx_proc_create(char *exepath,unsigned long timelimit,unsigned long memlimit){
     int ret;
     int i,j;
 
     struct stat st;
-    struct judge_proc_info *proc_info;
-    struct judge_check_info *check_info;
+    struct judgx_proc_info *proc_info;
 
-    if(stat(path,&st)){
-	return (void*)-1;
-    }
-    if(!S_ISREG(st.st_mode)){
-	return (void*)-1;
-    }
-    if(stat(sopath,&st)){
+    if(stat(exepath,&st)){
 	return (void*)-1;
     }
     if(!S_ISREG(st.st_mode)){
 	return (void*)-1;
     }
 
-    proc_info = malloc(sizeof(struct judge_proc_info));
-    check_info = malloc(sizeof(struct judge_check_info));
-    if(proc_info == NULL || check_info == NULL){
+    proc_info = malloc(sizeof(struct judgx_proc_info));
+    if(proc_info == NULL){
 	goto error;
     }
 
-    proc_info->path[0] = '\0';
-    strncat(proc_info->path,path,sizeof(proc_info->path));
-    check_info->sopath[0] = '\0';
-    strncat(check_info->sopath,sopath,sizeof(check_info->sopath));
+    proc_info->exe_path[0] = '\0';
+    strncat(proc_info->exe_path,exepath,sizeof(proc_info->exe_path));
 
-    if((check_info->sohandle = dlopen(check_info->sopath,RTLD_LAZY | RTLD_NODELETE)) == NULL){
-	goto error;
-    }
-    check_info->init_fn = dlsym(check_info->sohandle,"init_fn");
-    check_info->run_fn = dlsym(check_info->sohandle,"run_fn");
-    check_info->post_fn = dlsym(check_info->sohandle,"post_fn");
-    check_info->clean_fn = dlsym(check_info->sohandle,"clean_fn");
-    check_info->data = NULL;
-
-    if(check_info->init_fn(abspath,&check_info->data)){
-	goto error;
-    }
-
-    proc_info->name[NAME_MAX] = '\0';
-    for(i = 0,j = 0;proc_info->path[i] != '\0' && j < NAME_MAX;i++){
-	if(proc_info->path[i] == '/'){
+    proc_info->exe_name[NAME_MAX] = '\0';
+    for(i = 0,j = 0;proc_info->exe_path[i] != '\0' && j < NAME_MAX;i++){
+	if(proc_info->exe_path[i] == '/'){
 	    j = 0;
 	}else{
-	    proc_info->name[j] = proc_info->path[i];
+	    proc_info->exe_name[j] = proc_info->exe_path[i];
 	    j++;
 	}
     }
     proc_info->status = JUDGE_ERR;
-    proc_info->name[j] = '\0';
+    proc_info->exe_name[j] = '\0';
     proc_info->pid = -1;
     proc_info->task = -1;
-    proc_info->check_info = check_info;
     proc_info->timelimit = timelimit;
     proc_info->memlimit = memlimit;
     proc_info->runtime = 0L;
@@ -85,23 +140,17 @@ error:
     if(proc_info != NULL){
 	free(proc_info);
     }
-    if(check_info != NULL){
-	free(check_info);
-    }
-    
-    return (void*)-1;
-}
-int judge_proc_free(struct judge_proc_info *proc_info){
-    dlclose(proc_info->check_info->sohandle);
-    free(proc_info->check_info);
-    free(proc_info);
 
+    return NULL;
+}
+DLL_PUBLIC int judgx_proc_free(struct judgx_proc_info *proc_info){
+    free(proc_info);
     return 0;
 }
-static int proc_protect(struct judge_proc_info *proc_info){
+static int proc_protect(struct judgx_proc_info *proc_info){
     cap_t caps;
     struct rlimit limit;
-    struct judge_com_proc_add com_proc_add;
+    struct judgx_com_proc_add com_proc_add;
 
     /*caps = cap_init();
     if(cap_set_file(proc_info->path,caps)){
@@ -127,24 +176,22 @@ static int proc_protect(struct judge_proc_info *proc_info){
     prlimit(proc_info->pid,RLIMIT_AS,&limit,NULL);*/
 
     com_proc_add.path[0] = '\0';
-    strncat(com_proc_add.path,proc_info->path,sizeof(com_proc_add.path));
+    strncat(com_proc_add.path,proc_info->exe_path,sizeof(com_proc_add.path));
     com_proc_add.pid = proc_info->pid;
     com_proc_add.memlimit = proc_info->memlimit * 1024L + 4096L * 128L;
-    if(ioctl(judge_modfd,IOCTL_PROC_ADD,&com_proc_add)){
+    if(ioctl(judgx_modfd,IOCTL_PROC_ADD,&com_proc_add)){
 	return -1;
     }
     proc_info->task = com_proc_add.task;
 
     return 0;
 }
-int judge_proc_run(struct judge_proc_info *proc_info){
+DLL_PUBLIC int judgx_proc_run(struct judgx_proc_info *proc_info,judgx_check_run_fn check_run,void *check_data){
     int ret;
 
-    struct judge_check_info *check_info;
     int waitstatus;
-    struct judge_com_proc_get com_proc_get;
+    struct judgx_com_proc_get com_proc_get;
         
-    check_info = proc_info->check_info;
     ret = 0;
 
     printf("proc1\n");
@@ -153,15 +200,14 @@ int judge_proc_run(struct judge_proc_info *proc_info){
 	char *argv[] = {NULL,NULL};
 	char *envp[] = {NULL};
 
-	if(check_info->run_fn(check_info->data)){
-	    exit(-1);
-	}
+	check_run(check_data);
+
 	setgid(99);
 	setuid(99);
 	kill(getpid(),SIGSTOP);
 
-	argv[0] = proc_info->name;
-	execve(proc_info->path,argv,envp);
+	argv[0] = proc_info->exe_name;
+	execve(proc_info->exe_path,argv,envp);
     }
 
     printf("proc2\n");
@@ -188,7 +234,7 @@ int judge_proc_run(struct judge_proc_info *proc_info){
     }
 
     com_proc_get.task = proc_info->task;
-    if(ioctl(judge_modfd,IOCTL_PROC_GET,&com_proc_get)){
+    if(ioctl(judgx_modfd,IOCTL_PROC_GET,&com_proc_get)){
 	ret = -1;
 	goto clean;
     }
@@ -209,7 +255,7 @@ int judge_proc_run(struct judge_proc_info *proc_info){
     }else if(WEXITSTATUS(waitstatus) == JUDGE_RF){
 	proc_info->status = JUDGE_RF;
     }else{
-	proc_info->status = check_info->post_fn(check_info->data);
+	proc_info->status = JUDGE_AC;
     }
 
     printf("proc6\n");
@@ -220,9 +266,8 @@ clean:
 	kill(proc_info->pid,SIGKILL);
     }
     if(proc_info->task != -1){
-	ioctl(judge_modfd,IOCTL_PROC_DEL,proc_info->task);
+	ioctl(judgx_modfd,IOCTL_PROC_DEL,proc_info->task);
     }
-    check_info->clean_fn(check_info->data);
 
     printf("proc7\n");
 

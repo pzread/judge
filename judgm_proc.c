@@ -4,9 +4,10 @@
 #include<linux/sched.h>
 #include<asm/uaccess.h>
 
-#include"judgm_proc.h"
 #include"judgm.h"
-#include"judge_com.h"
+#include"judge_def.h"
+#include"judgx_com.h"
+#include"judgm_proc.h"
 
 int judgm_proc_init(){
     int i;
@@ -24,12 +25,12 @@ int judgm_proc_add(unsigned long arg){
 
     struct task_struct *task;
     struct judgm_proc_info *info;
-    struct judge_com_proc_add *com_proc_add;
+    struct judgx_com_proc_add *com_proc_add;
 
     ret = 0;
 
-    com_proc_add = kmalloc(sizeof(struct judge_com_proc_add),GFP_KERNEL);
-    copy_from_user(com_proc_add,(void* __user)arg,sizeof(struct judge_com_proc_add));
+    com_proc_add = kmalloc(sizeof(struct judgx_com_proc_add),GFP_KERNEL);
+    copy_from_user(com_proc_add,(void* __user)arg,sizeof(struct judgx_com_proc_add));
     if((task = get_pid_task(find_vpid(com_proc_add->pid),PIDTYPE_PID)) == NULL){
 	ret = -1;
 	goto end;
@@ -62,7 +63,7 @@ int judgm_proc_add(unsigned long arg){
     spin_unlock(&proc_task_htlock);
 
     com_proc_add->task = (unsigned long)task;
-    copy_to_user((void* __user)arg,com_proc_add,sizeof(struct judge_com_proc_add));
+    copy_to_user((void* __user)arg,com_proc_add,sizeof(struct judgx_com_proc_add));
 
 end:
 
@@ -73,10 +74,10 @@ end:
 int judgm_proc_get(unsigned long arg){
     struct task_struct *task;
     struct judgm_proc_info *info;
-    struct judge_com_proc_get *com_proc_get;
+    struct judgx_com_proc_get *com_proc_get;
 
-    com_proc_get = kmalloc(sizeof(struct judge_com_proc_get),GFP_KERNEL);
-    copy_from_user(com_proc_get,(void* __user)arg,sizeof(struct judge_com_proc_get));
+    com_proc_get = kmalloc(sizeof(struct judgx_com_proc_get),GFP_KERNEL);
+    copy_from_user(com_proc_get,(void* __user)arg,sizeof(struct judgx_com_proc_get));
     task = (struct task_struct*)com_proc_get->task;
     if((info = judgm_proc_task_lookup(task)) == NULL){
 	kfree(com_proc_get);
@@ -87,7 +88,7 @@ int judgm_proc_get(unsigned long arg){
     com_proc_get->runtime = cputime_to_usecs(task->utime) + cputime_to_usecs(task->stime);
     com_proc_get->peakmem = info->peakmem;
 
-    copy_to_user((void* __user)arg,com_proc_get,sizeof(struct judge_com_proc_get));
+    copy_to_user((void* __user)arg,com_proc_get,sizeof(struct judgx_com_proc_get));
     kfree(com_proc_get);
 
     return 0;

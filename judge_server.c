@@ -4,65 +4,26 @@
 #include<limits.h>
 #include<pthread.h>
 #include<semaphore.h>
+#include<dlfcn.h>
 #include<sys/socket.h>
 #include<netinet/in.h>
 #include<mysql/mysql.h>
 
+#include"judge_def.h"
 #include"judge.h"
+#include"judgx_line.h"
 #include"judge_server.h"
-#include"judge_ini.h"
 
-static void server_inihandler(void *data,char *section,char *key,char *value){
-    int i;
-    
-    struct judge_setting_info *setting_info;
-    char *part;
-    char *savpart;
-    
-    setting_info = (struct judge_setting_info*)data;
-    if(strcmp(section,"JUDGE") == 0){
-	if(strcmp(key,"timelimit") == 0){
-	    setting_info->timelimit = atoi(value);
-	}else if(strcmp(key,"memlimit") == 0){
-	    setting_info->memlimit = atoi(value);
-	}else if(strcmp(key,"count") == 0){
-	    setting_info->count = atoi(value);
-	}else if(strcmp(key,"score") == 0){
-	    part = strtok_r(value,",",&savpart);
-	    i = 0;
-	    while(part != NULL){
-		setting_info->score[i] = atoi(part);
-		part = strtok_r(NULL,",",&savpart);
-		i++;
-	    }
-	}
-    }
-}
-static int server_compile(char *cpppath,char *exepath){
-    int pid;
-    int waitstatus;
-    
-    if((pid = fork()) == 0){
-	char *argv[] = {"g++","-static","-O2",cpppath,"-o",exepath,NULL};
+#define JUDGE_DB_MAXSCOREMAX 1024
 
-	freopen("/dev/null","w",stdout);
-	freopen("/dev/null","w",stderr);
-
-	execvp("g++",argv);
-    }
-    waitpid(pid,&waitstatus,0);
-    if(waitstatus){
-	return -1;
-    }
-
-    return 0;
-}
-static int server_updatedb(MYSQL *sqli,struct judge_submit_info *submit_info,struct judge_setting_info *setting_info){
+static int server_updatedb(MYSQL *sqli,int submitid,int result_count,struct judgx_line_result *result){
     int i;
     int j;
 
     char sqlstatus[JUDGE_DB_STATUSMAX + 1];
     char sqlscore[JUDGE_DB_SCOREMAX + 1];
+    int sqltotalscore;
+    char sqlmaxscore[JUDGE_DB_MAXSCOREMAX + 1];
     char sqlruntime[JUDGE_DB_RUNTIMEMAX + 1];
     char sqlpeakmem[JUDGE_DB_PEAKMEMMAX + 1];
 
@@ -70,32 +31,42 @@ static int server_updatedb(MYSQL *sqli,struct judge_submit_info *submit_info,str
 
     printf("sql1 %d\n",getpid());
 
-    for(i = 0,j = 0;i < setting_info->count;i++){
-	snprintf(sqlstatus + j,sizeof(sqlstatus) - j,"%d,",submit_info->status[i]);
+    for(i = 0,j = 0;i < result_count;i++){
+	snprintf(sqlstatus + j,sizeof(sqlstatus) - j,"%d,",result[i].status);
 	while(sqlstatus[j] != '\0'){
 	    j++;
 	}
     }
     sqlstatus[j - 1] = '\0';
 
-    for(i = 0,j = 0;i < setting_info->count;i++){
-	snprintf(sqlscore + j,sizeof(sqlscore) - j,"%d,",submit_info->score[i]);
+    sqltotalscore = 0;
+    for(i = 0,j = 0;i < result_count;i++){
+	sqltotalscore += result[i].score;
+	snprintf(sqlscore + j,sizeof(sqlscore) - j,"%d,",result[i].score);
 	while(sqlscore[j] != '\0'){
 	    j++;
 	}
     }
     sqlscore[j - 1] = '\0';
 
-    for(i = 0,j = 0;i < setting_info->count;i++){
-	snprintf(sqlruntime + j,sizeof(sqlruntime) - j,"%lu,",submit_info->runtime[i]);
+    for(i = 0,j = 0;i < result_count;i++){
+	snprintf(sqlmaxscore + j,sizeof(sqlmaxscore) - j,"%d,",result[i].maxscore);
+	while(sqlmaxscore[j] != '\0'){
+	    j++;
+	}
+    }
+    sqlmaxscore[j - 1] = '\0';
+
+    for(i = 0,j = 0;i < result_count;i++){
+	snprintf(sqlruntime + j,sizeof(sqlruntime) - j,"%lu,",result[i].runtime);
 	while(sqlruntime[j] != '\0'){
 	    j++;
 	}
     }
     sqlruntime[j - 1] = '\0';
 
-    for(i = 0,j = 0;i < setting_info->count;i++){
-	snprintf(sqlpeakmem + j,sizeof(sqlpeakmem) - j,"%lu,",submit_info->peakmem[i]);
+    for(i = 0,j = 0;i < result_count;i++){
+	snprintf(sqlpeakmem + j,sizeof(sqlpeakmem) - j,"%lu,",result[i].peakmem);
 	while(sqlpeakmem[j] != '\0'){
 	    j++;
 	}
@@ -106,8 +77,7 @@ static int server_updatedb(MYSQL *sqli,struct judge_submit_info *submit_info,str
 
     sqlbuf = malloc(8192);
 
-    snprintf(sqlbuf,8192,"UPDATE submit SET status='%s',score='%s',runtime='%s',peakmem='%s' WHERE submitid='%d'",sqlstatus,sqlscore,sqlruntime,sqlpeakmem,submit_info->submitid);
-
+    snprintf(sqlbuf,8192,"UPDATE submit SET status='%s',score='%s',totalscore='%d',maxscore='%s',runtime='%s',peakmem='%s' WHERE submitid='%d'",sqlstatus,sqlscore,sqltotalscore,sqlmaxscore,sqlruntime,sqlpeakmem,submitid);
     mysql_real_query(sqli,sqlbuf,strlen(sqlbuf));
 
     printf("sql3\n");
@@ -122,13 +92,12 @@ static void* server_thread(void *arg){
     int i;
 
     struct judge_submit_info *submit_info;
+    struct judgx_line_info *line_info;
 
-    char setpath[PATH_MAX + 1];
-    char cpppath[PATH_MAX + 1];
-    char exepath[PATH_MAX + 1];
-    char abspath[PATH_MAX + 1];
-    struct judge_setting_info setting_info;
-    struct judge_proc_info *proc_info;
+    char tname[NAME_MAX + 1];
+    char tpath[PATH_MAX + 1];
+
+    line_run_fn line_run;
 
     MYSQL sqli;
     my_bool reconn;
@@ -153,61 +122,37 @@ static void* server_thread(void *arg){
 
 	pthread_mutex_unlock(&server_queue_mutex);
 
-	snprintf(setpath,sizeof(setpath),"pro/%d/%d_setting.txt",submit_info->proid,submit_info->proid);
-	judge_ini_load(setpath,server_inihandler,&setting_info);
+	line_info = malloc(sizeof(struct judgx_line_info));
 
-	snprintf(cpppath,sizeof(cpppath),"submit/%d_submit.cpp",submit_info->submitid);
-	snprintf(exepath,sizeof(exepath),"run/%d_submit",submit_info->submitid);
+	snprintf(line_info->pro_path,sizeof(line_info->pro_path),"pro/%d",submit_info->proid);
+	snprintf(line_info->cpp_path,sizeof(line_info->cpp_path),"submit/%d_submit.cpp",submit_info->submitid);
+	snprintf(line_info->exe_path,sizeof(line_info->exe_path),"run/%d_submit",submit_info->submitid);
 
-	for(i = 0;i < JUDGE_SET_COUNTMAX;i++){
-	    submit_info->status[i] = JUDGE_ERR;
-	    submit_info->score[i] = 0;
-	    submit_info->runtime[i] = 0;
-	    submit_info->peakmem[i] = 0;
+	snprintf(tpath,sizeof(tpath),"pro/%d/%d_setting.txt",submit_info->proid,submit_info->proid);
+	if((line_info->set_file = fopen(tpath,"r")) != NULL){
+
 	}
 
-	if(server_compile(cpppath,exepath)){
-	    for(i = 0;i < setting_info.count;i++){
-		submit_info->status[i] = JUDGE_CE;
-	    }
-	}else{
-	    for(i = 0;i < setting_info.count;i++){
-		snprintf(abspath,sizeof(abspath),"pro/%d/%d",submit_info->proid,i + 1);
+	fgets(tname,sizeof(tname),line_info->set_file);
+	tname[strlen(tname) - 1] = '\0';
+	snprintf(tpath,sizeof(tpath),"judge/%s.so",tname);
+	line_info->line_dll = dlopen(tpath,RTLD_LAZY | RTLD_NODELETE);
 
-		printf("thr1\n");
+	fgets(tname,sizeof(tname),line_info->set_file);
+	tname[strlen(tname) - 1] = '\0';
+	snprintf(tpath,sizeof(tpath),"judge/%s.so",tname);
+	line_info->check_dll = dlopen(tpath,RTLD_LAZY | RTLD_NODELETE);
 
-		if((proc_info = judge_proc_create(abspath,exepath,"judge/check.so",setting_info.timelimit,setting_info.memlimit)) == (void*)-1){
-		    submit_info->status[i] = JUDGE_ERR;
-		    continue;
-		}
+	line_run = dlsym(line_info->line_dll,"run");
+	line_run(line_info);
 
-		printf("thr2\n");
+	server_updatedb(&sqli,submit_info->submitid,line_info->result_count,line_info->result);
 
-		if(judge_proc_run(proc_info)){
-		    judge_proc_free(proc_info);
-		    submit_info->status[i] = JUDGE_ERR;
-		    continue;
-		}
-		submit_info->status[i] = JUDGE_ERR;
+	fclose(line_info->set_file);
+	dlclose(line_info->line_dll);
+	dlclose(line_info->check_dll);
 
-		printf("thr3\n");
-
-		submit_info->status[i] = proc_info->status;
-		if(submit_info->status[i] == JUDGE_AC){
-		    submit_info->score[i] = setting_info.score[i];
-		}else{
-		    submit_info->score[i] = 0;
-		}
-		submit_info->runtime[i] = proc_info->runtime;
-		submit_info->peakmem[i] = proc_info->peakmem;
-		
-		judge_proc_free(proc_info);
-	    }
-	}
-
-	printf("%d %lu %lu\n",submit_info->status[0],submit_info->runtime[0],submit_info->peakmem[0]);
-	server_updatedb(&sqli,submit_info,&setting_info);
-
+	free(line_info);
 	free(submit_info);
 
 	printf("out\n");
@@ -267,6 +212,8 @@ int judge_server(){
 	pthread_mutex_unlock(&server_queue_mutex);
 
 	sem_post(&server_queue_sem);
+
+	close(csd);
     }
     free(buf);
 
