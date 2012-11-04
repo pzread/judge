@@ -54,8 +54,12 @@ DLL_PUBLIC int run(struct judgx_line_info *line_info){
     unsigned long runtime;
     unsigned long peakmem;
 
+    printf("line1\n");
+
     set_info = malloc(sizeof(struct line_setting_info));
     judgx_ini_load(line_info->set_file,line_ini_handler,set_info);
+
+    printf("line2\n");
 
     if(judgx_compile(line_info->cpp_path,line_info->exe_path,NULL) == JUDGE_CE){
 	for(i = 0;i < set_info->count;i++){
@@ -70,11 +74,15 @@ DLL_PUBLIC int run(struct judgx_line_info *line_info){
 	goto clean;
     }
 
+    printf("line3\n");
+
     check_init = dlsym(line_info->check_dll,"init");
     check_run = dlsym(line_info->check_dll,"run");
     check_post = dlsym(line_info->check_dll,"post");
     check_clean = dlsym(line_info->check_dll,"clean");
     check_data = NULL;
+
+    printf("line4\n");
 
     for(i = 0;i < set_info->count;i++){
 	status = JUDGE_ERR;
@@ -82,9 +90,13 @@ DLL_PUBLIC int run(struct judgx_line_info *line_info){
 	runtime = 0;
 	peakmem = 0;
 
+	printf("line5\n");
+
 	if(!(proc_info = judgx_proc_create(line_info->exe_path,set_info->timelimit,set_info->memlimit))){
 	    goto proc_end;   	
 	}
+
+	printf("line7\n");
 
 	snprintf(datapath,sizeof(datapath),"%s/%d",line_info->pro_path,(i + 1));
 	if(check_init(datapath,&check_data)){
@@ -125,11 +137,15 @@ proc_end:
 	line_info->result[i].peakmem = peakmem;
     }
 
+    printf("line8\n");
+
     line_info->result_count = set_info->count;
 
 clean:
 
     free(set_info);
+
+    printf("line10\n");
 
     return 0;
 }

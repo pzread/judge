@@ -51,7 +51,7 @@ static unsigned int syscall_whitelist[SYSCALL_WHITELIST_SIZE] = {
     __NR_arch_prctl,
     __NR_times,
     __NR_time,
-    __NR_clock_gettime,
+    __NR_clock_gettime
 };
 
 int judgm_syscall_hook(void);

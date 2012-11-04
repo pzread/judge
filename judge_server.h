@@ -8,7 +8,7 @@ struct judge_submit_info{
     int proid;
 };
 
-static int server_updatedb(MYSQL *sqli,int submitid,int result_count,struct judgx_line_result *result);
+static int server_updatedb(PGconn *sqlc,int submitid,int result_count,struct judgx_line_result *result);
 static void* server_thread(void *arg);
 
 static struct judge_submit_info server_queue_head;

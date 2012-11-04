@@ -7,7 +7,8 @@
 #include<dlfcn.h>
 #include<sys/socket.h>
 #include<netinet/in.h>
-#include<mysql/mysql.h>
+#include<errno.h>
+#include<libpq-fe.h>
 
 #include"judge_def.h"
 #include"judge.h"
@@ -16,75 +17,89 @@
 
 #define JUDGE_DB_MAXSCOREMAX 1024
 
-static int server_updatedb(MYSQL *sqli,int submitid,int result_count,struct judgx_line_result *result){
+static int server_updatedb(PGconn *sqlc,int submitid,int result_count,struct judgx_line_result *result){
     int i;
     int j;
 
     char sqlstatus[JUDGE_DB_STATUSMAX + 1];
     char sqlscore[JUDGE_DB_SCOREMAX + 1];
-    int sqltotalscore;
     char sqlmaxscore[JUDGE_DB_MAXSCOREMAX + 1];
     char sqlruntime[JUDGE_DB_RUNTIMEMAX + 1];
     char sqlpeakmem[JUDGE_DB_PEAKMEMMAX + 1];
+    char sqlsubmitid[64];
 
-    char *sqlbuf;
+    const char *sqlparam[6];
+    PGresult *sqlr;
 
     printf("sql1 %d\n",getpid());
 
-    for(i = 0,j = 0;i < result_count;i++){
+    sqlstatus[0] = '{';
+    for(i = 0,j = 1;i < result_count;i++){
 	snprintf(sqlstatus + j,sizeof(sqlstatus) - j,"%d,",result[i].status);
 	while(sqlstatus[j] != '\0'){
 	    j++;
 	}
     }
-    sqlstatus[j - 1] = '\0';
+    sqlstatus[j - 1] = '}';
 
-    sqltotalscore = 0;
-    for(i = 0,j = 0;i < result_count;i++){
-	sqltotalscore += result[i].score;
+    sqlscore[0] = '{';
+    for(i = 0,j = 1;i < result_count;i++){
 	snprintf(sqlscore + j,sizeof(sqlscore) - j,"%d,",result[i].score);
 	while(sqlscore[j] != '\0'){
 	    j++;
 	}
     }
-    sqlscore[j - 1] = '\0';
+    sqlscore[j - 1] = '}';
 
-    for(i = 0,j = 0;i < result_count;i++){
+    sqlmaxscore[0] = '{';
+    for(i = 0,j = 1;i < result_count;i++){
 	snprintf(sqlmaxscore + j,sizeof(sqlmaxscore) - j,"%d,",result[i].maxscore);
 	while(sqlmaxscore[j] != '\0'){
 	    j++;
 	}
     }
-    sqlmaxscore[j - 1] = '\0';
+    sqlmaxscore[j - 1] = '}';
 
-    for(i = 0,j = 0;i < result_count;i++){
+    sqlruntime[0] = '{';
+    for(i = 0,j = 1;i < result_count;i++){
 	snprintf(sqlruntime + j,sizeof(sqlruntime) - j,"%lu,",result[i].runtime);
 	while(sqlruntime[j] != '\0'){
 	    j++;
 	}
     }
-    sqlruntime[j - 1] = '\0';
+    sqlruntime[j - 1] = '}';
 
-    for(i = 0,j = 0;i < result_count;i++){
+    sqlpeakmem[0] = '{';
+    for(i = 0,j = 1;i < result_count;i++){
 	snprintf(sqlpeakmem + j,sizeof(sqlpeakmem) - j,"%lu,",result[i].peakmem);
 	while(sqlpeakmem[j] != '\0'){
 	    j++;
 	}
     }
-    sqlpeakmem[j - 1] = '\0';
+    sqlpeakmem[j - 1] = '}';
+
+    snprintf(sqlsubmitid,64,"%d",submitid);
 
     printf("sql2\n");
 
-    sqlbuf = malloc(8192);
+    sqlparam[0] = sqlstatus;
+    sqlparam[1] = sqlscore;
+    sqlparam[2] = sqlmaxscore;
+    sqlparam[3] = sqlruntime;
+    sqlparam[4] = sqlpeakmem;
+    sqlparam[5] = sqlsubmitid;
 
-    snprintf(sqlbuf,8192,"UPDATE submit SET status='%s',score='%s',totalscore='%d',maxscore='%s',runtime='%s',peakmem='%s' WHERE submitid='%d'",sqlstatus,sqlscore,sqltotalscore,sqlmaxscore,sqlruntime,sqlpeakmem,submitid);
-    mysql_real_query(sqli,sqlbuf,strlen(sqlbuf));
+    sqlr = PQexecParams(sqlc,
+	    "UPDATE \"submit\" SET \"status\"=$1,\"score\"=$2,\"maxscore\"=$3,\"runtime\"=$4,\"peakmem\"=$5 WHERE \"submitid\"=$6;",
+	    6,
+	    NULL,
+	    sqlparam,
+	    NULL,
+	    NULL,
+	    0);
+    PQclear(sqlr);
 
     printf("sql3\n");
-
-    free(sqlbuf);
-
-    printf("sql4\n");
 
     return 0;
 }
@@ -99,13 +114,9 @@ static void* server_thread(void *arg){
 
     line_run_fn line_run;
 
-    MYSQL sqli;
-    my_bool reconn;
+    PGconn *sqlc;
 
-    mysql_init(&sqli);
-    reconn = 1;
-    mysql_options(&sqli,MYSQL_OPT_RECONNECT,&reconn);
-    mysql_real_connect(&sqli,"127.0.0.1","xxxxx","xxxxx","expoj",0,NULL,0);
+    sqlc = PQconnectdb("host=localhost port=5432 dbname=xxxxx user=xxxxx password=xxxxx");
 
     while(1){
 	printf("in\n");
@@ -122,31 +133,55 @@ static void* server_thread(void *arg){
 
 	pthread_mutex_unlock(&server_queue_mutex);
 
+	printf("in2\n");
+
 	line_info = malloc(sizeof(struct judgx_line_info));
+
+	printf("in3\n");
 
 	snprintf(line_info->pro_path,sizeof(line_info->pro_path),"pro/%d",submit_info->proid);
 	snprintf(line_info->cpp_path,sizeof(line_info->cpp_path),"submit/%d_submit.cpp",submit_info->submitid);
 	snprintf(line_info->exe_path,sizeof(line_info->exe_path),"run/%d_submit",submit_info->submitid);
 
-	snprintf(tpath,sizeof(tpath),"pro/%d/%d_setting.txt",submit_info->proid,submit_info->proid);
-	if((line_info->set_file = fopen(tpath,"r")) != NULL){
+	printf("in4");
 
+	snprintf(tpath,sizeof(tpath),"pro/%d/%d_setting.txt",submit_info->proid,submit_info->proid);
+	while((line_info->set_file = fopen(tpath,"r")) == NULL){
+	    printf("Oops %s\n",strerror(errno));
+	    printf("Path %s %d %d\n",tpath,submit_info->proid,submit_info->submitid);
+	    break;
 	}
 
-	fgets(tname,sizeof(tname),line_info->set_file);
-	tname[strlen(tname) - 1] = '\0';
-	snprintf(tpath,sizeof(tpath),"judge/%s.so",tname);
-	line_info->line_dll = dlopen(tpath,RTLD_LAZY | RTLD_NODELETE);
+	printf("in5\n");
 
 	fgets(tname,sizeof(tname),line_info->set_file);
 	tname[strlen(tname) - 1] = '\0';
 	snprintf(tpath,sizeof(tpath),"judge/%s.so",tname);
+
+	printf("in5-1\n");
+
+	line_info->line_dll = dlopen(tpath,RTLD_LAZY | RTLD_NODELETE);
+
+	printf("in5-2\n");
+
+	fgets(tname,sizeof(tname),line_info->set_file);
+	tname[strlen(tname) - 1] = '\0';
+	snprintf(tpath,sizeof(tpath),"judge/%s.so",tname);
+
+	printf("in5-3\n");
+
 	line_info->check_dll = dlopen(tpath,RTLD_LAZY | RTLD_NODELETE);
+
+	printf("in6\n");
 
 	line_run = dlsym(line_info->line_dll,"run");
 	line_run(line_info);
 
-	server_updatedb(&sqli,submit_info->submitid,line_info->result_count,line_info->result);
+	printf("in7\n");
+
+	server_updatedb(sqlc,submit_info->submitid,line_info->result_count,line_info->result);
+
+	printf("in8\n");
 
 	fclose(line_info->set_file);
 	dlclose(line_info->line_dll);
@@ -158,7 +193,7 @@ static void* server_thread(void *arg){
 	printf("out\n");
     }
 
-    mysql_close(&sqli);
+    PQfinish(sqlc);
 
     return NULL;
 }
@@ -182,7 +217,7 @@ int judge_server(){
     sem_init(&server_queue_sem,0,0);
     pthread_mutex_init(&server_queue_mutex,NULL); 
 
-    for(i = 0;i < 1;i++){
+    for(i = 0;i < 2;i++){
 	pthread_create(&pt[i],NULL,server_thread,NULL);
     }
 
@@ -195,8 +230,13 @@ int judge_server(){
 
     buf = malloc(65536);
     while((csd = accept(ssd,(struct sockaddr*)&saddr,&ret)) != -1){
-	recv(csd,buf,65536,0);
+	i = 0;
+	if((ret = recv(csd,buf + i,65536,0)) != -1){
+	    i += ret;
+	}
 	sscanf(buf,"%d %d",&submitid,&proid);
+
+	printf("        %d %d\n",submitid,proid);
 
 	submit_info = malloc(sizeof(struct judge_submit_info));	
 	submit_info->submitid = submitid;

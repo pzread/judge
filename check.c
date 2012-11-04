@@ -77,6 +77,8 @@ DLL_PUBLIC int init(char *datapath,void **data){
     int wpid;
     int rpid;
 
+    printf("check1\n");
+
     info = malloc(sizeof(struct check_info));
     pipe(info->pin);
     pipe(info->pout);
@@ -92,6 +94,8 @@ DLL_PUBLIC int init(char *datapath,void **data){
     pthread_create(&info->rpt,NULL,read_thread,info);
 
     *data = info;
+
+    printf("check2\n");
 
     return 0;
 
