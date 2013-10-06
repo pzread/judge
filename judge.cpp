@@ -39,35 +39,40 @@ typedef struct{
 JUDGE_INFO judgeInfo;
 
 char excludeList[128][128] = {
-    "ZwGetTickCount",
-    "ZwSetEvent",
-    "ZwDelayExecution",
-    "ZwQueryValueKey",
-    "ZwWriteFile",
-    "ZwReadFile",
-    "ZwQueryInformationFile",
-    "ZwSetInformationFile",
-    "ZwQueryInformationProcess",
-    "ZwSetInformationThread",
-    "ZwClose",
-    "ZwOpenKey",
-    "ZwTerminateProcess",
-    "ZwFlushInstructionCache",
-    "ZwProtectVirtualMemory",
-    "ZwWriteVirtualMemory",
-    "ZwAllocateVirtualMemory",
-    "ZwContinue",
-    "ZwDeviceIoControlFile",
-    "ZwQueryVirtualMemory",
-    "ZwFreeVirtualMemory",
-    "ZwTestAlert",
-    "ZwCreateSemaphore",
-    "ZwRequestWaitReplyPort",
-    "ZwQueryPerformanceCounter",
-    "ZwQueryInformationThread",
-    "ZwTerminateThread",
-    "ZwReleaseMutant",
-    "ZwWaitForSingleObject"
+   "ZwGetTickCount",
+   "ZwSetEvent",
+   "ZwDelayExecution",
+   "ZwQueryValueKey",
+   "ZwWriteFile",
+   "ZwReadFile",
+   "ZwQueryInformationFile",
+   "ZwSetInformationFile",
+   "ZwQueryInformationProcess",
+   "ZwSetInformationThread",
+   "ZwClose",
+   "ZwOpenKey",
+   "ZwTerminateProcess",
+   "ZwFlushInstructionCache",
+   "ZwProtectVirtualMemory",
+   "ZwWriteVirtualMemory",
+   "ZwAllocateVirtualMemory",
+   "ZwContinue",
+   "ZwDeviceIoControlFile",
+   "ZwQueryVirtualMemory",
+   "ZwFreeVirtualMemory",
+   "ZwTestAlert",
+   "ZwCreateSemaphore",
+   "ZwRequestWaitReplyPort",
+   "ZwQueryPerformanceCounter",
+   "ZwQueryInformationThread",
+   "ZwTerminateThread",
+   "ZwReleaseMutant",
+   "ZwWaitForSingleObject",
+   "ZwOpenFile",
+   "ZwOpenProcessToken",
+   "ZwQueryInformationToken",
+   "ZwTraceControl",
+   "ZwTraceEvent"
 };
 
 #define TokenIntegrityLevel (TOKEN_INFORMATION_CLASS)25
@@ -204,7 +209,7 @@ int RF_Patch(HANDLE hProc){
 	name = (char*)(base + rvaList[i]);
 	if(name[0] == 'Z' && name[1] == 'w'){
 	    flag = 0;
-	    for(j = 0;j < 29;j++){
+	    for(j = 0;j < 34;j++){
 		if(strcmp(name,excludeList[j]) == 0){
 		    flag = 1;
 		    break;
