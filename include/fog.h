@@ -1,3 +1,6 @@
+#ifndef _FOG_H
+#define _FOG_H
+
 #define FOG_CONT_UID 2147483647
 #define FOG_CONT_GID 2147483647
 
@@ -12,3 +15,5 @@ int fog_cont_alloc(const char *snap,unsigned long memlimit);
 int fog_cont_free(int id);
 int fog_cont_attach(int id);
 int fog_cont_stat(int id,struct cont_stat *stat);
+
+#endif

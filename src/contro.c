@@ -3,16 +3,10 @@
 #define EXEC_STACKSIZE (16 * 1024)
 #define COMPILE_MEMLIMIT (256 * 1024 * 1024)
 
-#define CHALL_ST_AC 0
-#define CHALL_ST_WA 1
-#define CHALL_ST_TLE 1
-#define CHALL_ST_MLE 2
-#define CHALL_ST_RE 3
-#define CHALL_ST_CE 4
-#define CHALL_ST_ERR 5
-#define CHALL_ST_PEND 100
-#define CHALL_ST_COMP 101
-#define CHALL_ST_RUN 102
+#define CHALL_ST_PEND 0
+#define CHALL_ST_COMP 1
+#define CHALL_ST_RUN 2
+#define CHALL_ST_EXIT 3
 
 #include<stdio.h>
 #include<stdlib.h>
@@ -24,14 +18,22 @@
 #include<semaphore.h>
 #include<sys/mman.h>
 
+#include"def.h"
 #include"fog.h"
 #include"task.h"
+#include"io.h"
 #include"contro.h"
 
 struct chall_data{
     int cont_id;
     sem_t *lock;
+
+    int state;
     int status;
+    int run_count;
+    pid_t run_pid;
+
+    struct io_header *iohdr;
 };
 
 static int challenge(void);
@@ -42,6 +44,7 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo);
 static int run(struct chall_data *cdata);
 static int exec_run(struct chall_data *cdata);
 static void handle_runsig(struct task *task,siginfo_t *siginfo);
+static void handle_endio(struct chall_data *cdata,int status);
 
 static int challenge(void){
     struct chall_data *cdata = NULL;
@@ -61,7 +64,11 @@ static int challenge(void){
         goto err;
     }
     cdata->cont_id = contid;
-    cdata->status = CHALL_ST_PEND;
+
+    cdata->status = STATUS_NONE;
+    cdata->state = CHALL_ST_PEND;
+    cdata->run_count = 0;
+    cdata->run_pid = 0;
 
     chall_dispatch(cdata);
 
@@ -84,34 +91,37 @@ err:
     return -1;
 }
 static void chall_dispatch(struct chall_data *cdata){
-    switch(cdata->status){
+    switch(cdata->state){
 	case CHALL_ST_PEND:
-	    cdata->status = CHALL_ST_COMP;
+	    cdata->state = CHALL_ST_COMP;
 	    if(compile(cdata)){
-		cdata->status = CHALL_ST_ERR;	
-		goto end;
+		cdata->state = CHALL_ST_EXIT;
+		cdata->status = max(cdata->status,STATUS_ERR);
 	    }
 
 	    break;
 
 	case CHALL_ST_COMP:
-	    cdata->status = CHALL_ST_RUN;
+	    cdata->state = CHALL_ST_RUN;
 	    if(run(cdata)){
-		cdata->status = CHALL_ST_ERR;	
-		goto end;
+		cdata->state = CHALL_ST_EXIT;
+		cdata->status = max(cdata->status,STATUS_ERR);
 	    }
 
 	    break;
 
-	default:
-	    goto end;
+	case CHALL_ST_RUN:
+	    cdata->run_count -= 1;
+	    if(cdata->run_count == 0){
+		cdata->state = CHALL_ST_EXIT;
+	    }
+
+	    break;
     }
 
-    return;
-
-end:
-
-    printf("  %d\n",cdata->status);
+    if(cdata->state == CHALL_ST_EXIT){
+	printf("  %d\n",cdata->status);
+    }
 }
 static int compile(struct chall_data *cdata){
     int ret;
@@ -146,15 +156,15 @@ static int compile(struct chall_data *cdata){
     return 0;
 
 err:
-
+    
+    if(task != NULL){
+        task_put(task);
+    }
     if(pid > 0){
         kill(pid,SIGKILL);
     }
     if(stack != NULL){
         munmap(stack,EXEC_STACKSIZE);
-    }
-    if(task != NULL){
-        task_put(task);
     }
 
     return -1;
@@ -187,7 +197,8 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo){
 
     cdata = (struct chall_data*)task->private;
     if(siginfo->si_code != CLD_EXITED || siginfo->si_status != 0){
-	cdata->status = CHALL_ST_CE;
+	cdata->state = CHALL_ST_EXIT;
+	cdata->status = max(cdata->status,STATUS_CE);
     }
 
     task->sig_handler = NULL;
@@ -198,6 +209,7 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo){
 static int run(struct chall_data *cdata){
     int ret;
 
+    struct io_header *iohdr = NULL;
     void *stack = NULL;
     pid_t pid = 0;
     struct task *task = NULL;
@@ -205,6 +217,13 @@ static int run(struct chall_data *cdata){
     if(sem_getvalue(cdata->lock,&ret) || ret != 0){
 	goto err;
     }
+
+    if((iohdr = io_stdfile_alloc("data/1/in","data/1/ans")) == NULL){
+	goto err;
+    }
+    iohdr->end_data = cdata;
+    iohdr->end_handler = (void (*)(void*,int))handle_endio;
+    cdata->iohdr = iohdr;
 
     if((stack = mmap(NULL,EXEC_STACKSIZE,PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK,-1,0)) == NULL){
@@ -223,30 +242,43 @@ static int run(struct chall_data *cdata){
     task->private = cdata;
     task->sig_handler = handle_runsig;
 
+    cdata->run_count += 2;
+    cdata->run_pid = pid;
+    
+    if(IO_POST(iohdr)){
+	goto err;
+    }
+
     sem_post(cdata->lock);
 
     return 0;
 
 err:
 
+    if(task != NULL){
+        task_put(task);
+    }
     if(pid > 0){
         kill(pid,SIGKILL);
+    }
+    if(iohdr != NULL){
+	IO_FREE(iohdr);
     }
     if(stack != NULL){
         munmap(stack,EXEC_STACKSIZE);
     }
-    if(task != NULL){
-        task_put(task);
-    }
 
     return -1;
-
 }
 static int exec_run(struct chall_data *cdata){
     char *args[] = {"main",NULL};
     char *envp[] = {NULL};
     
     sem_wait(cdata->lock);
+
+    if(IO_EXEC(cdata->iohdr)){
+	exit(1); 
+    }
 
     if(fog_cont_attach(cdata->cont_id)){
         exit(1);
@@ -268,15 +300,23 @@ static void handle_runsig(struct task *task,siginfo_t *siginfo){
     }
 
     cdata = (struct chall_data*)task->private;
-    if(siginfo->si_code != CLD_EXITED || siginfo->si_status != 0){
-	cdata->status = CHALL_ST_RE;
-    }else{
-	cdata->status = CHALL_ST_AC;
+    cdata->run_pid = 0;
+
+    if(siginfo->si_code != CLD_EXITED && siginfo->si_status != SIGKILL){
+	cdata->status = max(cdata->status,STATUS_RE);
     }
 
     task->sig_handler = NULL;
     task_put(task);
 
+    chall_dispatch(cdata);
+}
+static void handle_endio(struct chall_data *cdata,int status){
+    if(cdata->run_pid != 0){
+	kill(cdata->run_pid,SIGKILL);
+    }
+
+    cdata->status = max(cdata->status,status);
     chall_dispatch(cdata);
 }
 
