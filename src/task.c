@@ -110,9 +110,14 @@ int task_get(struct task *task){
     return 0;
 }
 int task_put(struct task *task){
+    khiter_t hit;
+
     task->refcount -= 1; 
 
     if(task->refcount == 0){
+        hit = kh_get(ptr,task_ht,task->pid);
+        kh_del(ptr,task_ht,hit);
+
 	free(task);
     }
 
