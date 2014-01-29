@@ -1,0 +1,13 @@
+*.swp
+
+*.o
+*.so
+
+*.py[cod]
+__pycache__/
+
+snapshot/
+container/
+cgroup/
+build/
+khash/

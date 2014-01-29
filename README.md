@@ -1,4 +1,4 @@
-judge9
-=====
+judge12 HypeXky
+===============
 
-judge server on Linux x86_64, kernel >= 3.5
+judge server on Linux 64-bit
