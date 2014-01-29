@@ -9,7 +9,7 @@
 #include<sys/wait.h>
 #include<sys/signalfd.h>
 
-#include"khash/khash.h"
+#include"klib/khash.h"
 #include"ev.h"
 #include"task.h"
 

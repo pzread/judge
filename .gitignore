@@ -11,4 +11,4 @@ container/
 data/
 cgroup/
 build/
-khash/
+klib/

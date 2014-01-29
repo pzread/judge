@@ -5,7 +5,7 @@
 #include<string.h>
 #include<signal.h>
 #include<Python.h>
-#include"khash/khash.h"
+#include"klib/khash.h"
 
 #include"ev.h"
 #include"contro.h"
