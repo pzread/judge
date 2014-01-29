@@ -69,6 +69,7 @@ static int challenge(void){
     cdata->state = CHALL_ST_PEND;
     cdata->run_count = 0;
     cdata->run_pid = 0;
+    cdata->iohdr = NULL;
 
     chall_dispatch(cdata);
 
@@ -77,12 +78,12 @@ static int challenge(void){
 err:
 
     if(cdata != NULL){
-	free(cdata);
-
 	if(cdata->lock != NULL){
 	    sem_destroy(cdata->lock);
 	    munmap(cdata->lock,sizeof(*cdata->lock));
 	}
+
+	free(cdata);
     }
     if(contid != -1){
 	fog_cont_free(contid);
@@ -121,6 +122,16 @@ static void chall_dispatch(struct chall_data *cdata){
 
     if(cdata->state == CHALL_ST_EXIT){
 	printf("  %d\n",cdata->status);
+
+	if(cdata->iohdr != NULL){
+	    IO_FREE(cdata->iohdr);
+	}
+
+	fog_cont_free(cdata->cont_id);
+
+	sem_destroy(cdata->lock);
+	munmap(cdata->lock,sizeof(*cdata->lock));
+	free(cdata);
     }
 }
 static int compile(struct chall_data *cdata){
