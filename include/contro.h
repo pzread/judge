@@ -1,13 +1,14 @@
 #ifndef _CONTRO_H
 #define _CONTRO_H
 
-typedef void (*chal_compret_handler)(int chalid,int status);
-typedef void (*chal_runret_handler)(int chalid,
+typedef void (*chal_compret_handler)(void *chalpri,int status);
+typedef void (*chal_runret_handler)(void *chalpri,
 	int status,unsigned long runtime,unsigned long memory);
 
 int contro_init(void);
-int chal_comp(int chalid,chal_compret_handler ret_handler,
+int chal_comp(chal_compret_handler ret_handler,void *chalpri,
 	const char *code_path,const char *out_path);
-int chal_run(int chalid,chal_runret_handler ret_handler,const char *run_path);
+int chal_run(chal_runret_handler ret_handler,void *chalpri,
+	const char *run_path,unsigned long timelimit,unsigned long memlimit);
 
 #endif

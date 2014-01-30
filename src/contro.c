@@ -33,7 +33,7 @@ struct comp_data{
     sem_t *lock;
     char out_path[PATH_MAX + 1];
 
-    int chal_id;
+    void *chal_private;
     chal_compret_handler ret_handler;
 };
 struct run_data{
@@ -45,7 +45,7 @@ struct run_data{
     pid_t run_pid;
     struct io_header *iohdr;
 
-    int chal_id;
+    void *chal_private;
     chal_runret_handler ret_handler;
 };
 
@@ -86,7 +86,7 @@ end:
 
     return ret;
 }
-int chal_comp(int chalid,chal_compret_handler ret_handler,
+int chal_comp(chal_compret_handler ret_handler,void *chalpri,
 	const char *code_path,const char *out_path){
     struct comp_data *cdata = NULL;
     int contid = -1; 
@@ -98,7 +98,7 @@ int chal_comp(int chalid,chal_compret_handler ret_handler,
     if((cdata = malloc(sizeof(*cdata))) == NULL){
 	goto err; 
     }
-    cdata->chal_id = chalid;
+    cdata->chal_private = chalpri;
     cdata->ret_handler = ret_handler;
 
     if((cdata->lock = mmap(NULL,sizeof(*cdata->lock),PROT_READ | PROT_WRITE,
@@ -197,11 +197,11 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo){
 
     cdata = (struct comp_data*)task->private;
     if(siginfo->si_code != CLD_EXITED || siginfo->si_status != 0){
-	cdata->ret_handler(cdata->chal_id,STATUS_CE);
+	cdata->ret_handler(cdata->chal_private,STATUS_CE);
     }else{
 	snprintf(path,PATH_MAX + 1,"container/%d/out/a.out",cdata->cont_id);
 	copy_file(cdata->out_path,path);
-	cdata->ret_handler(cdata->chal_id,STATUS_NONE);
+	cdata->ret_handler(cdata->chal_private,STATUS_NONE);
     }
 
     task_put(task);
@@ -210,7 +210,8 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo){
     munmap(cdata->lock,sizeof(*cdata->lock));
     free(cdata);
 }
-int chal_run(int chalid,chal_runret_handler ret_handler,const char *run_path){
+int chal_run(chal_runret_handler ret_handler,void* chalpri,
+	const char *run_path,unsigned long timelimit,unsigned long memlimit){
     struct run_data *rdata = NULL;
     struct io_header *iohdr = NULL;
     int contid = -1; 
@@ -222,7 +223,7 @@ int chal_run(int chalid,chal_runret_handler ret_handler,const char *run_path){
     if((rdata = malloc(sizeof(*rdata))) == NULL){
 	goto err; 
     }
-    rdata->chal_id = chalid;
+    rdata->chal_private = chalpri;
     rdata->ret_handler = ret_handler;
 
     if((rdata->lock = mmap(NULL,sizeof(*rdata->lock),PROT_READ | PROT_WRITE,
@@ -269,7 +270,8 @@ int chal_run(int chalid,chal_runret_handler ret_handler,const char *run_path){
     task->private = rdata;
     task->sig_handler = handle_runsig;
 
-    rdata->run_count += 2;
+    rdata->status = STATUS_NONE;
+    rdata->run_count = 2;
     rdata->run_pid = pid;
     
     if(IO_POST(iohdr)){
@@ -347,6 +349,8 @@ static void handle_runsig(struct task *task,siginfo_t *siginfo){
     }
 }
 static void handle_runend(struct run_data *rdata,int status){
+    struct cont_stat contst;
+
     if(rdata->run_pid != 0){
 	kill(rdata->run_pid,SIGKILL);
     }
@@ -355,10 +359,9 @@ static void handle_runend(struct run_data *rdata,int status){
 
     rdata->run_count -= 1;
     if(rdata->run_count == 0){
-	struct cont_stat contst;
-
 	fog_cont_stat(rdata->cont_id,&contst);
-	printf("%d %lu %lu\n",rdata->status,contst.utime,contst.memory);
+	rdata->ret_handler(rdata->chal_private,
+		rdata->status,contst.utime,contst.memory);
 
 	IO_FREE(rdata->iohdr);
 	fog_cont_free(rdata->cont_id);

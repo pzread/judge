@@ -47,10 +47,10 @@ struct io_header* io_stdfile_alloc(const char *in_path,const char *ans_path){
     iodata->min_fd = -1;
     iodata->ans_fd = -1;
 
-    if((iodata->sin_fd = open(in_path,O_RDONLY)) == -1){
+    if((iodata->sin_fd = open(in_path,O_RDONLY | O_CLOEXEC)) == -1){
 	goto err;
     }
-    if((iodata->ans_fd = open(ans_path,O_RDONLY)) == -1){
+    if((iodata->ans_fd = open(ans_path,O_RDONLY | O_CLOEXEC)) == -1){
 	goto err;
     }
     if(pipe(opipe) == -1){

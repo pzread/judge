@@ -26,8 +26,8 @@ static PyObject* pyext_epoll_poll(PyObject *self,PyObject *args);
 
 static PyObject* pyext_chal_comp(PyObject *self,PyObject *args);
 static PyObject* pyext_chal_run(PyObject *self,PyObject *args);
-static void handle_chal_compret(int chalid,int status);
-static void handle_chal_runret(int chalid,
+static void handle_chal_compret(PyObject *callback,int status);
+static void handle_chal_runret(PyObject *callback,
 	int status,unsigned long runtime,unsigned long memory);
 
 static struct pyep_data* pyep_getby_epfd(int epfd);
@@ -311,26 +311,60 @@ static struct ev_header* evhdr_getby_fd(khash_t(ptr) *evhdr_ht,int fd){
 }
 
 static PyObject* pyext_chal_comp(PyObject *self,PyObject *args){
-    int chalid;
+    PyObject *callback;
+    const char *codepath;
+    const char *outpath;
 
-    if(!PyArg_ParseTuple(args,"i",&chalid)){
+    if(!PyArg_ParseTuple(args,"Oss",&callback,&codepath,&outpath)){
         PyErr_BadArgument();
         return NULL;
     }
 
-    chal_comp(chalid,handle_chal_compret,
-	    "tmp/code/main.cpp","tmp/run/a.out");
+    Py_XINCREF(callback);
+    chal_comp((chal_compret_handler)handle_chal_compret,callback,
+	    codepath,outpath);
 
     Py_INCREF(Py_None);
     return Py_None;
 }
 static PyObject* pyext_chal_run(PyObject *self,PyObject *args){
+    PyObject *callback;
+    const char *runpath;
+    unsigned long timelimit;
+    unsigned long memlimit;
+
+    if(!PyArg_ParseTuple(args,"Oskk",&callback,&runpath,&timelimit,&memlimit)){
+        PyErr_BadArgument();
+        return NULL;
+    }
+
+    Py_XINCREF(callback);
+    chal_run((chal_runret_handler)handle_chal_runret,callback,
+	    runpath,timelimit,memlimit);
+
     Py_INCREF(Py_None);
     return Py_None;
 }
-static void handle_chal_compret(int chalid,int status){
-    printf("%d %d\n",chalid,status);
+static void handle_chal_compret(PyObject *callback,int status){
+    PyObject *args;
+    PyObject *ret;
+
+    args = Py_BuildValue("(i)",status);
+    if((ret = PyObject_CallObject(callback,args)) != NULL){
+	Py_XDECREF(ret);
+    }
+    Py_XDECREF(args);
+    Py_XDECREF(callback);
 }
-static void handle_chal_runret(int chalid,
+static void handle_chal_runret(PyObject *callback,
 	int status,unsigned long runtime,unsigned long memory){
+    PyObject *args;
+    PyObject *ret;
+
+    args = Py_BuildValue("(ikk)",status,runtime,memory);
+    if((ret = PyObject_CallObject(callback,args)) != NULL){
+	Py_XDECREF(ret);
+    }
+    Py_XDECREF(args);
+    Py_XDECREF(callback);
 }
