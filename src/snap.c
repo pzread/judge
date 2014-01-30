@@ -17,11 +17,11 @@ int snap_create(const char *src,const char *dst,const char *name){
     int dstfd = -1;
     struct btrfs_ioctl_vol_args arg;
 
-    if((srcfd = open(src,O_RDONLY | O_DIRECTORY)) < 0){
+    if((srcfd = open(src,O_RDONLY | O_DIRECTORY | O_CLOEXEC)) < 0){
 	ret = -1;
 	goto end;
     }
-    if((dstfd = open(dst,O_RDONLY | O_DIRECTORY)) < 0){
+    if((dstfd = open(dst,O_RDONLY | O_DIRECTORY | O_CLOEXEC)) < 0){
 	ret = -1;
 	goto end;
     }
@@ -51,7 +51,7 @@ int snap_delete(const char *dst,const char *name){
     int dstfd = -1;
     struct btrfs_ioctl_vol_args arg;
     
-    if((dstfd = open(dst,O_RDONLY | O_DIRECTORY)) < 0){
+    if((dstfd = open(dst,O_RDONLY | O_DIRECTORY | O_CLOEXEC)) < 0){
 	ret = -1;
 	goto end;
     }

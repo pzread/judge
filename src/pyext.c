@@ -25,6 +25,7 @@ static PyObject* pyext_epoll_free(PyObject *self,PyObject *args);
 static PyObject* pyext_epoll_poll(PyObject *self,PyObject *args);
 
 static PyObject* pyext_chal_add(PyObject *self,PyObject *args);
+int pyext_chal_callback();
 
 static struct pyep_data* pyep_getby_epfd(int epfd);
 static struct ev_header* evhdr_getby_fd(khash_t(ptr) *evhdr_ht,int fd);

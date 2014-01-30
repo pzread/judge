@@ -15,8 +15,12 @@
 #include<limits.h>
 #include<signal.h>
 #include<sched.h>
+#include<fcntl.h>
+#include<unistd.h>
 #include<semaphore.h>
 #include<sys/mman.h>
+#include<sys/ioctl.h>
+#include<linux/btrfs.h>
 
 #include"def.h"
 #include"fog.h"
@@ -24,11 +28,15 @@
 #include"io.h"
 #include"contro.h"
 
-struct chall_data{
+struct comp_data{
+    int cont_id;
+    sem_t *lock;
+    char out_path[PATH_MAX + 1];
+};
+struct run_data{
     int cont_id;
     sem_t *lock;
 
-    int state;
     int status;
     int run_count;
     pid_t run_pid;
@@ -36,118 +44,77 @@ struct chall_data{
     struct io_header *iohdr;
 };
 
-static int challenge(void);
-static void chall_dispatch(struct chall_data *cdata);
-static int compile(struct chall_data *cdata);
-static int exec_comp(struct chall_data *cdata);
+static int copy_file(const char *dst,const char *src);
+static int exec_comp(struct comp_data *cdata);
 static void handle_compsig(struct task *task,siginfo_t *siginfo);
-static int run(struct chall_data *cdata);
-static int exec_run(struct chall_data *cdata);
+static int exec_run(struct run_data *rdata);
 static void handle_runsig(struct task *task,siginfo_t *siginfo);
-static void handle_endio(struct chall_data *cdata,int status);
+static void handle_runend(struct run_data *rdata,int status);
+int chal_comp(const char *code_path,const char *out_path);
+int chal_run(const char *run_path);
 
-static int challenge(void){
-    struct chall_data *cdata = NULL;
+static int copy_file(const char *dst,const char *src){
+    int ret = 0;
+
+    int srcfd = -1;
+    int dstfd = -1;
+
+    if((srcfd = open(src,O_RDONLY | O_CLOEXEC)) < 0){
+	ret = -1;
+	goto end;
+    }
+    if((dstfd = open(dst,O_WRONLY | O_CREAT | O_CLOEXEC)) < 0){
+	ret = -1;
+	goto end;
+    }
+    if(ioctl(dstfd,BTRFS_IOC_CLONE,srcfd)){
+	ret = -1;
+	goto end;
+    }
+
+end:
+
+    if(srcfd >= 0){
+	close(srcfd);
+    }
+    if(dstfd >= 0){
+	close(dstfd);
+    }
+
+    return ret;
+}
+int chal_comp(const char *code_path,const char *out_path){
+    struct comp_data *cdata = NULL;
     int contid = -1; 
+    char path[PATH_MAX + 1];
+    void *stack = NULL;
+    pid_t pid = 0;
+    struct task *task = NULL;
 
     if((cdata = malloc(sizeof(*cdata))) == NULL){
 	goto err; 
     }
-
     if((cdata->lock = mmap(NULL,sizeof(*cdata->lock),PROT_READ | PROT_WRITE,
 		    MAP_SHARED | MAP_ANONYMOUS,-1,0)) == NULL){
         goto err;
     }
     sem_init(cdata->lock,1,0);
 
-    if((contid = fog_cont_alloc("comprun")) < 0){
+    if((contid = fog_cont_alloc("compile")) < 0){
         goto err;
+    }
+    if(fog_cont_set(contid,COMPILE_MEMLIMIT)){
+	goto err;
     }
     cdata->cont_id = contid;
 
-    cdata->status = STATUS_NONE;
-    cdata->state = CHALL_ST_PEND;
-    cdata->run_count = 0;
-    cdata->run_pid = 0;
-    cdata->iohdr = NULL;
-
-    chall_dispatch(cdata);
-
-    return 0;
-
-err:
-
-    if(cdata != NULL){
-	if(cdata->lock != NULL){
-	    sem_destroy(cdata->lock);
-	    munmap(cdata->lock,sizeof(*cdata->lock));
-	}
-
-	free(cdata);
-    }
-    if(contid != -1){
-	fog_cont_free(contid);
-    }
-
-    return -1;
-}
-static void chall_dispatch(struct chall_data *cdata){
-    switch(cdata->state){
-	case CHALL_ST_PEND:
-	    cdata->state = CHALL_ST_COMP;
-	    if(compile(cdata)){
-		cdata->state = CHALL_ST_EXIT;
-		cdata->status = max(cdata->status,STATUS_ERR);
-	    }
-
-	    break;
-
-	case CHALL_ST_COMP:
-	    cdata->state = CHALL_ST_RUN;
-	    if(run(cdata)){
-		cdata->state = CHALL_ST_EXIT;
-		cdata->status = max(cdata->status,STATUS_ERR);
-	    }
-
-	    break;
-
-	case CHALL_ST_RUN:
-	    cdata->run_count -= 1;
-	    if(cdata->run_count == 0){
-		cdata->state = CHALL_ST_EXIT;
-	    }
-
-	    break;
-    }
-
-    if(cdata->state == CHALL_ST_EXIT){
-	struct cont_stat contst;
-
-	fog_cont_stat(cdata->cont_id,&contst);
-	printf("%d %lu %lu\n",cdata->status,contst.utime,contst.memory);
-
-	if(cdata->iohdr != NULL){
-	    IO_FREE(cdata->iohdr);
-	}
-	fog_cont_free(cdata->cont_id);
-	sem_destroy(cdata->lock);
-	munmap(cdata->lock,sizeof(*cdata->lock));
-	free(cdata);
-    }
-}
-static int compile(struct chall_data *cdata){
-    int ret;
-
-    void *stack = NULL;
-    pid_t pid = 0;
-    struct task *task = NULL;
-    
-    if(sem_getvalue(cdata->lock,&ret) || ret != 0){
+    snprintf(path,PATH_MAX + 1,"container/%d/code/main.cpp",contid);
+    if(copy_file(path,code_path)){
 	goto err;
     }
-    if(fog_cont_set(cdata->cont_id,COMPILE_MEMLIMIT)){
-	goto err;
-    }
+    chown(path,FOG_CONT_UID,FOG_CONT_GID);
+    strncpy(cdata->out_path,out_path,PATH_MAX);
+    cdata->out_path[PATH_MAX] = '\0';
 
     if((stack = mmap(NULL,EXEC_STACKSIZE,PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK,-1,0)) == NULL){
@@ -181,12 +148,23 @@ err:
     if(stack != NULL){
         munmap(stack,EXEC_STACKSIZE);
     }
+    if(contid != -1){
+	fog_cont_free(contid);
+    }
+    if(cdata != NULL){
+	if(cdata->lock != NULL){
+	    sem_destroy(cdata->lock);
+	    munmap(cdata->lock,sizeof(*cdata->lock));
+	}
 
+	free(cdata);
+    }
+    
     return -1;
 }
-static int exec_comp(struct chall_data *cdata){
+static int exec_comp(struct comp_data *cdata){
     char *args[] = {"g++","-O2","-std=c++0x",
-        "/code/main.cpp","-o","/run/main",NULL};
+        "/code/main.cpp","-o","/out/a.out",NULL};
     char *envp[] = {"PATH=/usr/bin",NULL};
     
     sem_wait(cdata->lock);
@@ -196,11 +174,12 @@ static int exec_comp(struct chall_data *cdata){
     }
 
     execve("/usr/bin/g++",args,envp);
-
     return 0;
 }
 static void handle_compsig(struct task *task,siginfo_t *siginfo){
-    struct chall_data *cdata;
+    struct comp_data *cdata;
+    int status = STATUS_NONE;
+    char path[PATH_MAX + 1];
 
     if(siginfo->si_code != CLD_EXITED &&
 	    siginfo->si_code != CLD_KILLED &&
@@ -210,41 +189,58 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo){
 	return;
     }
 
-    cdata = (struct chall_data*)task->private;
+    cdata = (struct comp_data*)task->private;
     if(siginfo->si_code != CLD_EXITED || siginfo->si_status != 0){
-	cdata->state = CHALL_ST_EXIT;
-	cdata->status = max(cdata->status,STATUS_CE);
+	status = STATUS_CE;
+    }else{
+	snprintf(path,PATH_MAX + 1,"container/%d/out/a.out",cdata->cont_id);
+	copy_file(cdata->out_path,path);
     }
 
-    task->sig_handler = NULL;
     task_put(task);
-
-    chall_dispatch(cdata);
+    fog_cont_free(cdata->cont_id);
+    sem_destroy(cdata->lock);
+    munmap(cdata->lock,sizeof(*cdata->lock));
+    free(cdata);
 }
-static int run(struct chall_data *cdata){
-    int ret;
-
+int chal_run(const char *run_path){
+    struct run_data *rdata = NULL;
     struct io_header *iohdr = NULL;
+    int contid = -1; 
+    char path[PATH_MAX + 1];
     void *stack = NULL;
     pid_t pid = 0;
     struct task *task = NULL;
+    
+    if((rdata = malloc(sizeof(*rdata))) == NULL){
+	goto err; 
+    }
+    if((rdata->lock = mmap(NULL,sizeof(*rdata->lock),PROT_READ | PROT_WRITE,
+		    MAP_SHARED | MAP_ANONYMOUS,-1,0)) == NULL){
+        goto err;
+    }
+    sem_init(rdata->lock,1,0);
 
-    if(sem_getvalue(cdata->lock,&ret) || ret != 0){
+    if((contid = fog_cont_alloc("run")) < 0){
+        goto err;
+    }
+    if(fog_cont_set(contid,65536 * 1024)){
 	goto err;
     }
-    if(fog_cont_reset(cdata->cont_id)){
+    rdata->cont_id = contid;
+
+    snprintf(path,PATH_MAX + 1,"container/%d/run/a.out",contid);
+    if(copy_file(path,run_path)){
 	goto err;
     }
-    if(fog_cont_set(cdata->cont_id,65536 * 1024)){
-	goto err;
-    }
+    chown(path,FOG_CONT_UID,FOG_CONT_GID);
 
     if((iohdr = io_stdfile_alloc("testdata/1/in","testdata/1/ans")) == NULL){
 	goto err;
     }
-    iohdr->end_data = cdata;
-    iohdr->end_handler = (void (*)(void*,int))handle_endio;
-    cdata->iohdr = iohdr;
+    iohdr->end_data = rdata;
+    iohdr->end_handler = (void (*)(void*,int))handle_runend;
+    rdata->iohdr = iohdr;
 
     if((stack = mmap(NULL,EXEC_STACKSIZE,PROT_READ | PROT_WRITE,
                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK,-1,0)) == NULL){
@@ -252,7 +248,7 @@ static int run(struct chall_data *cdata){
     }
     if((pid = clone((int (*)(void*))exec_run,stack + EXEC_STACKSIZE,
 		    SIGCHLD | CLONE_NEWNS | CLONE_NEWUTS |
-		    CLONE_NEWIPC | CLONE_NEWNET,cdata)) < 0){
+		    CLONE_NEWIPC | CLONE_NEWNET,rdata)) < 0){
         goto err;
     }
     munmap(stack,EXEC_STACKSIZE);
@@ -260,17 +256,17 @@ static int run(struct chall_data *cdata){
     if((task = task_alloc(pid)) == NULL){
         goto err;
     }
-    task->private = cdata;
+    task->private = rdata;
     task->sig_handler = handle_runsig;
 
-    cdata->run_count += 2;
-    cdata->run_pid = pid;
+    rdata->run_count += 2;
+    rdata->run_pid = pid;
     
     if(IO_POST(iohdr)){
 	goto err;
     }
 
-    sem_post(cdata->lock);
+    sem_post(rdata->lock);
 
     return 0;
 
@@ -288,29 +284,39 @@ err:
     if(stack != NULL){
         munmap(stack,EXEC_STACKSIZE);
     }
+    if(contid != -1){
+	fog_cont_free(contid);
+    }
+    if(rdata != NULL){
+	if(rdata->lock != NULL){
+	    sem_destroy(rdata->lock);
+	    munmap(rdata->lock,sizeof(*rdata->lock));
+	}
+
+	free(rdata);
+    }
 
     return -1;
 }
-static int exec_run(struct chall_data *cdata){
-    char *args[] = {"main",NULL};
+static int exec_run(struct run_data *rdata){
+    char *args[] = {"a.out",NULL};
     char *envp[] = {NULL};
     
-    sem_wait(cdata->lock);
+    sem_wait(rdata->lock);
 
-    if(IO_EXEC(cdata->iohdr)){
+    if(IO_EXEC(rdata->iohdr)){
 	exit(1); 
     }
 
-    if(fog_cont_attach(cdata->cont_id)){
+    if(fog_cont_attach(rdata->cont_id)){
         exit(1);
     }
 
-    execve("/run/main",args,envp);
-
+    execve("/run/a.out",args,envp);
     return 0;
 }
 static void handle_runsig(struct task *task,siginfo_t *siginfo){
-    struct chall_data *cdata;
+    struct run_data *rdata;
 
     if(siginfo->si_code != CLD_EXITED &&
 	    siginfo->si_code != CLD_KILLED &&
@@ -320,31 +326,40 @@ static void handle_runsig(struct task *task,siginfo_t *siginfo){
 	return;
     }
 
-    cdata = (struct chall_data*)task->private;
-    cdata->run_pid = 0;
-
-    if(siginfo->si_code != CLD_EXITED && siginfo->si_status != SIGKILL){
-	cdata->status = max(cdata->status,STATUS_RE);
-    }
-
-    task->sig_handler = NULL;
+    rdata = (struct run_data*)task->private;
+    rdata->run_pid = 0;
     task_put(task);
 
-    chall_dispatch(cdata);
+    if(siginfo->si_code != CLD_EXITED && siginfo->si_status != SIGKILL){
+	handle_runend(rdata,STATUS_RE);
+    }else{
+	handle_runend(rdata,STATUS_NONE);
+    }
 }
-static void handle_endio(struct chall_data *cdata,int status){
-    if(cdata->run_pid != 0){
-	kill(cdata->run_pid,SIGKILL);
+static void handle_runend(struct run_data *rdata,int status){
+    if(rdata->run_pid != 0){
+	kill(rdata->run_pid,SIGKILL);
     }
 
-    cdata->status = max(cdata->status,status);
-    chall_dispatch(cdata);
+    rdata->status = max(rdata->status,status);
+
+    rdata->run_count -= 1;
+    if(rdata->run_count == 0){
+	struct cont_stat contst;
+
+	fog_cont_stat(rdata->cont_id,&contst);
+	printf("%d %lu %lu\n",rdata->status,contst.utime,contst.memory);
+
+	IO_FREE(rdata->iohdr);
+	fog_cont_free(rdata->cont_id);
+	sem_destroy(rdata->lock);
+	munmap(rdata->lock,sizeof(*rdata->lock));
+	free(rdata);
+    }
 }
 
 int contro_test(void){
-
-    challenge();
-
+    chal_comp("tmp/code/main.cpp","tmp/run/a.out");
     return 0;
 }
 
