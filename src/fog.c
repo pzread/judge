@@ -84,12 +84,11 @@ static int chown_contdir(
     return FTW_CONTINUE;
 }
 
-int fog_cont_alloc(const char *snap,unsigned long memlimit){
+int fog_cont_alloc(const char *snap){
     int id;
     char name[BTRFS_PATH_NAME_MAX + 1];
     char path[PATH_MAX + 1];
     struct stat st;
-    FILE *f;
 
     last_cont_id++;
     id = last_cont_id;
@@ -120,11 +119,22 @@ int fog_cont_alloc(const char *snap,unsigned long memlimit){
 	return -1;
     }
 
-    f = fopen(path,"w");
+    return id;
+}
+int fog_cont_set(int id,unsigned long memlimit){
+    char path[PATH_MAX + 1];
+    FILE *f;
+
+    snprintf(path,PATH_MAX + 1,"cgroup/memory/%s_%d/memory.limit_in_bytes",
+	    CONTPREFIX,id);
+
+    if((f = fopen(path,"w")) == NULL){
+	return -1;
+    }
     fprintf(f,"%lu",memlimit);
     fclose(f);
-    
-    return id;
+
+    return 0;
 }
 int fog_cont_free(int id){
     char name[BTRFS_PATH_NAME_MAX + 1];
@@ -144,6 +154,27 @@ int fog_cont_free(int id){
 	return -1;
     }
 
+    return 0;
+}
+int fog_cont_reset(int id){
+    char path[PATH_MAX + 1];
+
+    snprintf(path,PATH_MAX + 1,"cgroup/cpu,cpuacct/%s_%d",CONTPREFIX,id);
+    if(rmdir(path)){
+	return -1;
+    }
+    if(mkdir(path,0700)){
+	return -1;
+    }
+
+    snprintf(path,PATH_MAX + 1,"cgroup/memory/%s_%d",CONTPREFIX,id);
+    if(rmdir(path)){
+	return -1;
+    }
+    if(mkdir(path,0700)){
+	return -1;
+    }
+    
     return 0;
 }
 /*static int delete_contdir(
@@ -204,7 +235,8 @@ int fog_cont_stat(int id,struct cont_stat *stat){
     char path[PATH_MAX + 1]; 
     FILE *f;
 
-    snprintf(path,PATH_MAX + 1,"cgroup/cpu,cpuacct/%s_%d/cpuacct.stat",CONTPREFIX,id);
+    snprintf(path,PATH_MAX + 1,"cgroup/cpu,cpuacct/%s_%d/cpuacct.stat",
+	    CONTPREFIX,id);
     if((f = fopen(path,"r")) == NULL){
 	return -1;
     }

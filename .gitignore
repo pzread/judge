@@ -8,7 +8,7 @@ __pycache__/
 
 snapshot/
 container/
-data/
+testdata/
 cgroup/
 build/
 klib/

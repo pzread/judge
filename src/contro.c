@@ -60,7 +60,7 @@ static int challenge(void){
     }
     sem_init(cdata->lock,1,0);
 
-    if((contid = fog_cont_alloc("comprun",COMPILE_MEMLIMIT)) < 0){
+    if((contid = fog_cont_alloc("comprun")) < 0){
         goto err;
     }
     cdata->cont_id = contid;
@@ -121,14 +121,15 @@ static void chall_dispatch(struct chall_data *cdata){
     }
 
     if(cdata->state == CHALL_ST_EXIT){
-	printf("  %d\n",cdata->status);
+	struct cont_stat contst;
+
+	fog_cont_stat(cdata->cont_id,&contst);
+	printf("%d %lu %lu\n",cdata->status,contst.utime,contst.memory);
 
 	if(cdata->iohdr != NULL){
 	    IO_FREE(cdata->iohdr);
 	}
-
 	fog_cont_free(cdata->cont_id);
-
 	sem_destroy(cdata->lock);
 	munmap(cdata->lock,sizeof(*cdata->lock));
 	free(cdata);
@@ -142,6 +143,9 @@ static int compile(struct chall_data *cdata){
     struct task *task = NULL;
     
     if(sem_getvalue(cdata->lock,&ret) || ret != 0){
+	goto err;
+    }
+    if(fog_cont_set(cdata->cont_id,COMPILE_MEMLIMIT)){
 	goto err;
     }
 
@@ -228,8 +232,14 @@ static int run(struct chall_data *cdata){
     if(sem_getvalue(cdata->lock,&ret) || ret != 0){
 	goto err;
     }
+    if(fog_cont_reset(cdata->cont_id)){
+	goto err;
+    }
+    if(fog_cont_set(cdata->cont_id,65536 * 1024)){
+	goto err;
+    }
 
-    if((iohdr = io_stdfile_alloc("data/1/in","data/1/ans")) == NULL){
+    if((iohdr = io_stdfile_alloc("testdata/1/in","testdata/1/ans")) == NULL){
 	goto err;
     }
     iohdr->end_data = cdata;
