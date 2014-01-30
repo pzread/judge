@@ -24,8 +24,11 @@ static PyObject* pyext_epoll_modify(PyObject *self,PyObject *args);
 static PyObject* pyext_epoll_free(PyObject *self,PyObject *args);
 static PyObject* pyext_epoll_poll(PyObject *self,PyObject *args);
 
-static PyObject* pyext_chal_add(PyObject *self,PyObject *args);
-int pyext_chal_callback();
+static PyObject* pyext_chal_comp(PyObject *self,PyObject *args);
+static PyObject* pyext_chal_run(PyObject *self,PyObject *args);
+static void handle_chal_compret(int chalid,int status);
+static void handle_chal_runret(int chalid,
+	int status,unsigned long runtime,unsigned long memory);
 
 static struct pyep_data* pyep_getby_epfd(int epfd);
 static struct ev_header* evhdr_getby_fd(khash_t(ptr) *evhdr_ht,int fd);
@@ -44,8 +47,10 @@ static PyMethodDef pyext_method[] = {
     {"epoll_poll",pyext_epoll_poll,METH_VARARGS,
         "epoll_poll"},
 
-    {"chal_add",pyext_chal_add,METH_VARARGS,
-        "chal_add"},
+    {"chal_comp",pyext_chal_comp,METH_VARARGS,
+        "chal_comp"},
+    {"chal_run",pyext_chal_run,METH_VARARGS,
+        "chal_run"},
 
     {NULL,NULL,0,NULL}
 };
@@ -305,10 +310,27 @@ static struct ev_header* evhdr_getby_fd(khash_t(ptr) *evhdr_ht,int fd){
     return (struct ev_header*)kh_value(evhdr_ht,hit);
 }
 
-static PyObject* pyext_chal_add(PyObject *self,PyObject *args){
+static PyObject* pyext_chal_comp(PyObject *self,PyObject *args){
+    int chalid;
 
-    contro_test();
+    if(!PyArg_ParseTuple(args,"i",&chalid)){
+        PyErr_BadArgument();
+        return NULL;
+    }
+
+    chal_comp(chalid,handle_chal_compret,
+	    "tmp/code/main.cpp","tmp/run/a.out");
 
     Py_INCREF(Py_None);
     return Py_None;
+}
+static PyObject* pyext_chal_run(PyObject *self,PyObject *args){
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+static void handle_chal_compret(int chalid,int status){
+    printf("%d %d\n",chalid,status);
+}
+static void handle_chal_runret(int chalid,
+	int status,unsigned long runtime,unsigned long memory){
 }

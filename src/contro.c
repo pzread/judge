@@ -32,6 +32,9 @@ struct comp_data{
     int cont_id;
     sem_t *lock;
     char out_path[PATH_MAX + 1];
+
+    int chal_id;
+    chal_compret_handler ret_handler;
 };
 struct run_data{
     int cont_id;
@@ -40,8 +43,10 @@ struct run_data{
     int status;
     int run_count;
     pid_t run_pid;
-
     struct io_header *iohdr;
+
+    int chal_id;
+    chal_runret_handler ret_handler;
 };
 
 static int copy_file(const char *dst,const char *src);
@@ -50,8 +55,6 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo);
 static int exec_run(struct run_data *rdata);
 static void handle_runsig(struct task *task,siginfo_t *siginfo);
 static void handle_runend(struct run_data *rdata,int status);
-int chal_comp(const char *code_path,const char *out_path);
-int chal_run(const char *run_path);
 
 static int copy_file(const char *dst,const char *src){
     int ret = 0;
@@ -63,7 +66,7 @@ static int copy_file(const char *dst,const char *src){
 	ret = -1;
 	goto end;
     }
-    if((dstfd = open(dst,O_WRONLY | O_CREAT | O_CLOEXEC)) < 0){
+    if((dstfd = open(dst,O_WRONLY | O_CREAT | O_CLOEXEC,0700)) < 0){
 	ret = -1;
 	goto end;
     }
@@ -83,7 +86,8 @@ end:
 
     return ret;
 }
-int chal_comp(const char *code_path,const char *out_path){
+int chal_comp(int chalid,chal_compret_handler ret_handler,
+	const char *code_path,const char *out_path){
     struct comp_data *cdata = NULL;
     int contid = -1; 
     char path[PATH_MAX + 1];
@@ -94,6 +98,9 @@ int chal_comp(const char *code_path,const char *out_path){
     if((cdata = malloc(sizeof(*cdata))) == NULL){
 	goto err; 
     }
+    cdata->chal_id = chalid;
+    cdata->ret_handler = ret_handler;
+
     if((cdata->lock = mmap(NULL,sizeof(*cdata->lock),PROT_READ | PROT_WRITE,
 		    MAP_SHARED | MAP_ANONYMOUS,-1,0)) == NULL){
         goto err;
@@ -178,7 +185,6 @@ static int exec_comp(struct comp_data *cdata){
 }
 static void handle_compsig(struct task *task,siginfo_t *siginfo){
     struct comp_data *cdata;
-    int status = STATUS_NONE;
     char path[PATH_MAX + 1];
 
     if(siginfo->si_code != CLD_EXITED &&
@@ -191,10 +197,11 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo){
 
     cdata = (struct comp_data*)task->private;
     if(siginfo->si_code != CLD_EXITED || siginfo->si_status != 0){
-	status = STATUS_CE;
+	cdata->ret_handler(cdata->chal_id,STATUS_CE);
     }else{
 	snprintf(path,PATH_MAX + 1,"container/%d/out/a.out",cdata->cont_id);
 	copy_file(cdata->out_path,path);
+	cdata->ret_handler(cdata->chal_id,STATUS_NONE);
     }
 
     task_put(task);
@@ -203,7 +210,7 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo){
     munmap(cdata->lock,sizeof(*cdata->lock));
     free(cdata);
 }
-int chal_run(const char *run_path){
+int chal_run(int chalid,chal_runret_handler ret_handler,const char *run_path){
     struct run_data *rdata = NULL;
     struct io_header *iohdr = NULL;
     int contid = -1; 
@@ -215,6 +222,9 @@ int chal_run(const char *run_path){
     if((rdata = malloc(sizeof(*rdata))) == NULL){
 	goto err; 
     }
+    rdata->chal_id = chalid;
+    rdata->ret_handler = ret_handler;
+
     if((rdata->lock = mmap(NULL,sizeof(*rdata->lock),PROT_READ | PROT_WRITE,
 		    MAP_SHARED | MAP_ANONYMOUS,-1,0)) == NULL){
         goto err;
@@ -356,11 +366,6 @@ static void handle_runend(struct run_data *rdata,int status){
 	munmap(rdata->lock,sizeof(*rdata->lock));
 	free(rdata);
     }
-}
-
-int contro_test(void){
-    chal_comp("tmp/code/main.cpp","tmp/run/a.out");
-    return 0;
 }
 
 int contro_init(void){
