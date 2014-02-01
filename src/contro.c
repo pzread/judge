@@ -20,6 +20,7 @@
 #include<semaphore.h>
 #include<sys/mman.h>
 #include<sys/ioctl.h>
+#include<sys/resource.h>
 #include<linux/btrfs.h>
 
 #include"def.h"
@@ -47,6 +48,9 @@ struct run_data{
 
     void *chal_private;
     chal_runret_handler ret_handler;
+
+    unsigned long timelimit;
+    unsigned long memlimit;
 };
 
 static int copy_file(const char *dst,const char *src);
@@ -235,10 +239,12 @@ int chal_run(chal_runret_handler ret_handler,void* chalpri,
     if((contid = fog_cont_alloc("run")) < 0){
         goto err;
     }
-    if(fog_cont_set(contid,65536 * 1024)){
+    /*if(fog_cont_set(contid,65536 * 1024)){
 	goto err;
-    }
+    }*/
     rdata->cont_id = contid;
+    rdata->timelimit = timelimit;
+    rdata->memlimit = memlimit;
 
     snprintf(path,PATH_MAX + 1,"container/%d/run/a.out",contid);
     if(copy_file(path,run_path)){
@@ -311,6 +317,7 @@ err:
     return -1;
 }
 static int exec_run(struct run_data *rdata){
+    struct rlimit limit;
     char *args[] = {"a.out",NULL};
     char *envp[] = {NULL};
     
@@ -319,6 +326,19 @@ static int exec_run(struct run_data *rdata){
     if(IO_EXEC(rdata->iohdr)){
 	exit(1); 
     }
+    
+    limit.rlim_cur = 1;
+    limit.rlim_max = 1;
+    setrlimit(RLIMIT_NPROC,&limit);
+    limit.rlim_cur = 16;
+    limit.rlim_max = 16;
+    setrlimit(RLIMIT_NOFILE,&limit);
+    limit.rlim_cur = (rdata->timelimit / 1000UL) + 1UL;
+    limit.rlim_max = limit.rlim_cur;
+    setrlimit(RLIMIT_CPU,&limit);
+    limit.rlim_cur = rdata->memlimit;
+    limit.rlim_max = limit.rlim_cur;
+    setrlimit(RLIMIT_AS,&limit);
 
     if(fog_cont_attach(rdata->cont_id)){
         exit(1);
@@ -342,7 +362,8 @@ static void handle_runsig(struct task *task,siginfo_t *siginfo){
     rdata->run_pid = 0;
     task_put(task);
 
-    if(siginfo->si_code != CLD_EXITED && siginfo->si_status != SIGKILL){
+    if((siginfo->si_code != CLD_EXITED && siginfo->si_status != SIGKILL) ||
+	    (siginfo->si_code == CLD_EXITED && siginfo->si_status != 0)){
 	handle_runend(rdata,STATUS_RE);
     }else{
 	handle_runend(rdata,STATUS_NONE);

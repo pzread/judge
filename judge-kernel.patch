@@ -1,0 +1,91 @@
+--- a/include/asm-generic/resource.h	2014-01-29 21:06:37.000000000 +0800
++++ b/include/asm-generic/resource.h	2014-02-01 05:57:07.252696600 +0800
+@@ -25,6 +25,7 @@
+ 	[RLIMIT_NICE]		= { 0, 0 },				\
+ 	[RLIMIT_RTPRIO]		= { 0, 0 },				\
+ 	[RLIMIT_RTTIME]		= {  RLIM_INFINITY,  RLIM_INFINITY },	\
++	[RLIMIT_UTIME]		= {  RLIM_INFINITY,  RLIM_INFINITY },	\
+ }
+ 
+ #endif
+--- a/include/uapi/asm-generic/resource.h	2014-01-29 21:06:37.000000000 +0800
++++ b/include/uapi/asm-generic/resource.h	2014-02-01 10:19:51.786545800 +0800
+@@ -45,7 +45,8 @@
+ 					   0-39 for nice level 19 .. -20 */
+ #define RLIMIT_RTPRIO		14	/* maximum realtime priority */
+ #define RLIMIT_RTTIME		15	/* timeout for RT tasks in us */
+-#define RLIM_NLIMITS		16
++#define RLIMIT_UTIME		16	/* User time in sec */
++#define RLIM_NLIMITS		17
+ 
+ /*
+  * SuS says limits have to be unsigned.
+--- a/kernel/posix-cpu-timers.c	2014-01-29 21:06:37.000000000 +0800
++++ b/kernel/posix-cpu-timers.c	2014-02-01 10:19:27.246545800 +0800
+@@ -1046,6 +1046,31 @@ static void check_process_timers(struct
+ 		}
+ 	}
+ 
++	soft = ACCESS_ONCE(sig->rlim[RLIMIT_UTIME].rlim_cur);
++	if(soft != RLIM_INFINITY){
++		unsigned long usecs = cputime_to_secs(utime);
++		unsigned long hard =
++			ACCESS_ONCE(sig->rlim[RLIMIT_UTIME].rlim_max);
++		if (usecs >= hard) {
++			/*
++			 * At the hard limit, we just die.
++			 * No need to calculate anything else now.
++			 */
++			__group_send_sig_info(SIGKILL, SEND_SIG_PRIV, tsk);
++			return;
++		}
++		if (usecs >= soft) {
++			/*
++			 * At the soft limit, send a SIGXCPU every second.
++			 */
++			__group_send_sig_info(SIGXCPU, SEND_SIG_PRIV, tsk);
++			if (soft < hard) {
++				soft++;
++				sig->rlim[RLIMIT_UTIME].rlim_cur = soft;
++			}
++		}
++	}
++
+ 	sig->cputime_expires.prof_exp = expires_to_cputime(prof_expires);
+ 	sig->cputime_expires.virt_exp = expires_to_cputime(virt_expires);
+ 	sig->cputime_expires.sched_exp = sched_expires;
+--- a/kernel/sys.c	2014-01-29 21:06:37.000000000 +0800
++++ b/kernel/sys.c	2014-02-01 09:51:27.280260400 +0800
+@@ -1382,6 +1382,15 @@ int do_prlimit(struct task_struct *tsk,
+ 			 */
+ 			new_rlim->rlim_cur = 1;
+ 		}
++		if(resource == RLIMIT_UTIME && new_rlim->rlim_cur == 0){
++			/*
++			 * The caller is asking for an immediate RLIMIT_UTIME
++			 * expiry.  But we use the zero value to mean "it was
++			 * never set".  So let's cheat and make it one second
++			 * instead
++			 */
++			new_rlim->rlim_cur = 1;
++		}
+ 	}
+ 	if (!retval) {
+ 		if (old_rlim)
+@@ -1400,6 +1409,16 @@ int do_prlimit(struct task_struct *tsk,
+ 	 if (!retval && new_rlim && resource == RLIMIT_CPU &&
+ 			 new_rlim->rlim_cur != RLIM_INFINITY)
+ 		update_rlimit_cpu(tsk, new_rlim->rlim_cur);
++
++	 if (!retval && new_rlim && resource == RLIMIT_UTIME &&
++			new_rlim->rlim_cur != RLIM_INFINITY){
++		cputime_t cputime = secs_to_cputime(new_rlim->rlim_cur);
++
++		spin_lock_irq(&tsk->sighand->siglock);
++		set_process_cpu_timer(tsk, CPUCLOCK_VIRT, &cputime,
++			NULL);
++		spin_unlock_irq(&tsk->sighand->siglock);
++	 }
+ out:
+ 	read_unlock(&tasklist_lock);
+ 	return retval;
