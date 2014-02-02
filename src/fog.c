@@ -57,7 +57,7 @@ int fog_init(void){
     if(stat("cgroup/cpu,cpuacct/cpuacct.stat",&st)){
 	return -1;
     }
-    if(stat("cgroup/memory/memory.max_usage_in_bytes",&st)){
+    if(stat("cgroup/memory/memory.memsw.max_usage_in_bytes",&st)){
 	return -1;
     }
     
@@ -231,6 +231,7 @@ int fog_cont_attach(int id){
 
     return 0;
 }
+/*
 int fog_cont_stat(int id,struct cont_stat *stat){
     char path[PATH_MAX + 1]; 
     FILE *f;
@@ -247,7 +248,17 @@ int fog_cont_stat(int id,struct cont_stat *stat){
     stat->stime *= 1000UL / sysconf(_SC_CLK_TCK);
     
     snprintf(path,PATH_MAX + 1,
-	    "cgroup/memory/%s_%d/memory.max_usage_in_bytes",CONTPREFIX,id);
+	    "cgroup/memory/%s_%d/memory.memsw.max_usage_in_bytes",
+	    CONTPREFIX,id);
+    if((f = fopen(path,"r")) == NULL){
+	return -1;
+    }
+    fscanf(f,"%lu",&stat->memory);
+    fclose(f);
+
+    snprintf(path,PATH_MAX + 1,
+	    "cgroup/memory/%s_%d/memory.kmem.max_usage_in_bytes",
+	    CONTPREFIX,id);
     if((f = fopen(path,"r")) == NULL){
 	return -1;
     }
@@ -256,3 +267,4 @@ int fog_cont_stat(int id,struct cont_stat *stat){
 
     return 0;
 }
+*/

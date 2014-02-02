@@ -7,6 +7,7 @@
 #define CHALL_ST_COMP 1
 #define CHALL_ST_RUN 2
 #define CHALL_ST_EXIT 3
+#define RLIMIT_UTIME 16
 
 #include<stdio.h>
 #include<stdlib.h>
@@ -44,6 +45,7 @@ struct run_data{
     int status;
     int run_count;
     pid_t run_pid;
+    struct task *task;
     struct io_header *iohdr;
 
     void *chal_private;
@@ -51,6 +53,8 @@ struct run_data{
 
     unsigned long timelimit;
     unsigned long memlimit;
+    unsigned long runtime;
+    unsigned long memory;
 };
 
 static int copy_file(const char *dst,const char *src);
@@ -58,6 +62,7 @@ static int exec_comp(struct comp_data *cdata);
 static void handle_compsig(struct task *task,siginfo_t *siginfo);
 static int exec_run(struct run_data *rdata);
 static void handle_runsig(struct task *task,siginfo_t *siginfo);
+static void handle_runstat(struct task *task,const struct taskstats *stats);
 static void handle_runend(struct run_data *rdata,int status);
 
 static int copy_file(const char *dst,const char *src){
@@ -265,7 +270,7 @@ int chal_run(chal_runret_handler ret_handler,void* chalpri,
     }
     if((pid = clone((int (*)(void*))exec_run,stack + EXEC_STACKSIZE,
 		    SIGCHLD | CLONE_NEWNS | CLONE_NEWUTS |
-		    CLONE_NEWIPC | CLONE_NEWNET,rdata)) < 0){
+		    CLONE_NEWIPC | CLONE_NEWNET | CLONE_NEWPID,rdata)) < 0){
         goto err;
     }
     munmap(stack,EXEC_STACKSIZE);
@@ -275,10 +280,12 @@ int chal_run(chal_runret_handler ret_handler,void* chalpri,
     }
     task->private = rdata;
     task->sig_handler = handle_runsig;
+    task->stat_handler = handle_runstat;
 
     rdata->status = STATUS_NONE;
     rdata->run_count = 2;
     rdata->run_pid = pid;
+    rdata->task = task;
     
     if(IO_POST(iohdr)){
 	goto err;
@@ -327,22 +334,23 @@ static int exec_run(struct run_data *rdata){
 	exit(1); 
     }
     
-    limit.rlim_cur = 1;
-    limit.rlim_max = 1;
-    setrlimit(RLIMIT_NPROC,&limit);
-    limit.rlim_cur = 16;
-    limit.rlim_max = 16;
-    setrlimit(RLIMIT_NOFILE,&limit);
-    limit.rlim_cur = (rdata->timelimit / 1000UL) + 1UL;
+    /*limit.rlim_cur = 1;
     limit.rlim_max = limit.rlim_cur;
-    setrlimit(RLIMIT_CPU,&limit);
-    limit.rlim_cur = rdata->memlimit;
-    limit.rlim_max = limit.rlim_cur;
-    setrlimit(RLIMIT_AS,&limit);
-
+    prlimit(getpid(),RLIMIT_NPROC,&limit,NULL);*/
+    
     if(fog_cont_attach(rdata->cont_id)){
         exit(1);
     }
+    
+    limit.rlim_cur = 16;
+    limit.rlim_max = limit.rlim_cur;
+    setrlimit(RLIMIT_NOFILE,&limit);
+    limit.rlim_cur = (rdata->timelimit / 1000UL) + 1UL;
+    limit.rlim_max = limit.rlim_cur;
+    setrlimit(RLIMIT_UTIME,&limit);
+    limit.rlim_cur = rdata->memlimit + 4096UL;
+    limit.rlim_max = limit.rlim_cur;
+    setrlimit(RLIMIT_AS,&limit);
 
     execve("/run/a.out",args,envp);
     return 0;
@@ -350,28 +358,34 @@ static int exec_run(struct run_data *rdata){
 static void handle_runsig(struct task *task,siginfo_t *siginfo){
     struct run_data *rdata;
 
+    rdata = (struct run_data*)task->private;
+
     if(siginfo->si_code != CLD_EXITED &&
 	    siginfo->si_code != CLD_KILLED &&
 	    siginfo->si_code != CLD_DUMPED){
 
 	kill(task->pid,SIGKILL); 
-	return;
+    }else{
+	rdata->run_pid = 0;
+	task->sig_handler = NULL;
     }
+
+    if(siginfo->si_code != CLD_EXITED){
+	rdata->status = max(rdata->status,STATUS_RE);
+    }
+}
+static void handle_runstat(struct task *task,const struct taskstats *stats){
+    struct run_data *rdata;
 
     rdata = (struct run_data*)task->private;
     rdata->run_pid = 0;
-    task_put(task);
+    task->stat_handler = NULL;
+    rdata->runtime = stats->ac_utime / 1000UL;
+    rdata->memory = stats->hiwater_vm;
 
-    if((siginfo->si_code != CLD_EXITED && siginfo->si_status != SIGKILL) ||
-	    (siginfo->si_code == CLD_EXITED && siginfo->si_status != 0)){
-	handle_runend(rdata,STATUS_RE);
-    }else{
-	handle_runend(rdata,STATUS_NONE);
-    }
+    handle_runend(rdata,STATUS_NONE);
 }
 static void handle_runend(struct run_data *rdata,int status){
-    struct cont_stat contst;
-
     if(rdata->run_pid != 0){
 	kill(rdata->run_pid,SIGKILL);
     }
@@ -380,9 +394,8 @@ static void handle_runend(struct run_data *rdata,int status){
 
     rdata->run_count -= 1;
     if(rdata->run_count == 0){
-	fog_cont_stat(rdata->cont_id,&contst);
 	rdata->ret_handler(rdata->chal_private,
-		rdata->status,contst.utime,contst.memory);
+		rdata->status,rdata->runtime,rdata->memory);
 
 	IO_FREE(rdata->iohdr);
 	fog_cont_free(rdata->cont_id);

@@ -3,11 +3,15 @@
 
 #include<signal.h>
 #include<sys/types.h>
+#include<linux/taskstats.h>
 
 struct task{
     unsigned long refcount;
     pid_t pid;
+
     void (*sig_handler)(struct task *task,siginfo_t *siginfo);
+    void (*stat_handler)(struct task *task,const struct taskstats *stats);
+
     void *private;
 };
 

@@ -16,6 +16,6 @@ int fog_cont_set(int id,unsigned long memlimit);
 int fog_cont_free(int id);
 int fog_cont_reset(int id);
 int fog_cont_attach(int id);
-int fog_cont_stat(int id,struct cont_stat *stat);
+//int fog_cont_stat(int id,struct cont_stat *stat);
 
 #endif
