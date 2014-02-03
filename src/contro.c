@@ -2,6 +2,7 @@
 
 #define EXEC_STACKSIZE (16 * 1024)
 #define COMPILE_MEMLIMIT (256 * 1024 * 1024)
+#define RUN_MEMLIMIT (256 * 1024 * 1024)
 
 #define CHALL_ST_PEND 0
 #define CHALL_ST_COMP 1
@@ -244,9 +245,9 @@ int chal_run(chal_runret_handler ret_handler,void* chalpri,
     if((contid = fog_cont_alloc("run")) < 0){
         goto err;
     }
-    /*if(fog_cont_set(contid,65536 * 1024)){
+    if(fog_cont_set(contid,RUN_MEMLIMIT)){
 	goto err;
-    }*/
+    }
     rdata->cont_id = contid;
     rdata->timelimit = timelimit;
     rdata->memlimit = memlimit;
@@ -269,8 +270,8 @@ int chal_run(chal_runret_handler ret_handler,void* chalpri,
         goto err;
     }
     if((pid = clone((int (*)(void*))exec_run,stack + EXEC_STACKSIZE,
-		    SIGCHLD | CLONE_NEWNS | CLONE_NEWUTS |
-		    CLONE_NEWIPC | CLONE_NEWNET | CLONE_NEWPID,rdata)) < 0){
+		    SIGCHLD | CLONE_NEWIPC | CLONE_NEWNET | CLONE_NEWNS |
+		    CLONE_NEWUTS,rdata)) < 0){
         goto err;
     }
     munmap(stack,EXEC_STACKSIZE);
@@ -334,10 +335,6 @@ static int exec_run(struct run_data *rdata){
 	exit(1); 
     }
     
-    /*limit.rlim_cur = 1;
-    limit.rlim_max = limit.rlim_cur;
-    prlimit(getpid(),RLIMIT_NPROC,&limit,NULL);*/
-    
     if(fog_cont_attach(rdata->cont_id)){
         exit(1);
     }
@@ -348,9 +345,9 @@ static int exec_run(struct run_data *rdata){
     limit.rlim_cur = (rdata->timelimit / 1000UL) + 1UL;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_UTIME,&limit);
-    limit.rlim_cur = rdata->memlimit + 4096UL;
+    /*limit.rlim_cur = rdata->memlimit + 4096UL;
     limit.rlim_max = limit.rlim_cur;
-    setrlimit(RLIMIT_AS,&limit);
+    setrlimit(RLIMIT_AS,&limit);*/
 
     execve("/run/a.out",args,envp);
     return 0;
@@ -376,14 +373,21 @@ static void handle_runsig(struct task *task,siginfo_t *siginfo){
 }
 static void handle_runstat(struct task *task,const struct taskstats *stats){
     struct run_data *rdata;
+    int status = STATUS_NONE;
 
     rdata = (struct run_data*)task->private;
     rdata->run_pid = 0;
     task->stat_handler = NULL;
     rdata->runtime = stats->ac_utime / 1000UL;
-    rdata->memory = stats->hiwater_vm;
+    rdata->memory = stats->hiwater_vm * 1024UL;
 
-    handle_runend(rdata,STATUS_NONE);
+    if(rdata->memory > rdata->memlimit){
+	status = STATUS_MLE;
+    }else if(stats->ac_utime > rdata->timelimit * 1000UL){
+	status = STATUS_TLE;
+    }
+
+    handle_runend(rdata,status);
 }
 static void handle_runend(struct run_data *rdata,int status){
     if(rdata->run_pid != 0){

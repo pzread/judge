@@ -30,7 +30,7 @@ def emit_chal():
     last_chal_id += 1 
     chalid = last_chal_id;
 
-    timelimit = 5000
+    timelimit = 4000
     memlimit = 65536 * 1024
     
     pyext.chal_comp(_comp_cb,"tmp/code/main.cpp","tmp/run/a.out")
