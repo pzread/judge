@@ -9,6 +9,7 @@ __pycache__/
 snapshot/
 container/
 testdata/
+templ/
 tmp/
 cgroup/
 build/

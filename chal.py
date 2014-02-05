@@ -33,10 +33,10 @@ def emit_chal():
     timelimit = 4000
     memlimit = 65536 * 1024
     
-    pyext.chal_comp(_comp_cb,"tmp/code/main.cpp","tmp/run/a.out")
+    pyext.chal_comp(_comp_cb,"tmp/res/asdf.tar.xz","tmp/run/a.out")
 
 class ChalAddHandler(tornado.web.RequestHandler):
     def get(self):
-        emit_chal()
+        #emit_chal()
 
         self.write('Hello World')

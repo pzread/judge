@@ -24,6 +24,8 @@
 #include<sys/ioctl.h>
 #include<sys/resource.h>
 #include<linux/btrfs.h>
+#include<archive.h>
+#include<archive_entry.h> 
 
 #include"def.h"
 #include"fog.h"
@@ -59,6 +61,7 @@ struct run_data{
 };
 
 static int copy_file(const char *dst,const char *src);
+static int extract_pack(const char *dst,const char *pack);
 static int exec_comp(struct comp_data *cdata);
 static void handle_compsig(struct task *task,siginfo_t *siginfo);
 static int exec_run(struct run_data *rdata);
@@ -96,6 +99,70 @@ end:
 
     return ret;
 }
+static int extract_pack(const char *dst,const char *pack){
+    int ret = 0;
+
+    struct archive *ar;
+    struct archive_entry *entry;
+    char path[PATH_MAX + 1];
+    const struct stat *st;
+    int fd;
+    int arret;
+    const void *buf;
+    size_t size;
+    off_t off;
+
+    if((ar = archive_read_new()) == NULL){
+	return -1;
+    } 
+    archive_read_support_filter_all(ar);
+    archive_read_support_format_all(ar);
+
+    if(archive_read_open_filename(ar,pack,65536)){
+	archive_read_free(ar);
+	return -1;
+    }
+
+    while(1){
+	arret = archive_read_next_header(ar,&entry);
+	if(arret == ARCHIVE_EOF){
+	    break;
+	}
+	if(arret < ARCHIVE_WARN){
+	    ret = -1;
+	    goto end;
+	}
+
+	snprintf(path,PATH_MAX + 1,"%s/%s",dst,archive_entry_pathname(entry));
+	st = archive_entry_stat(entry);
+
+	if(S_ISDIR(st->st_mode)){
+	    mkdir(path,0700);
+	}else{
+	    fd = open(path,O_WRONLY | O_CREAT | O_CLOEXEC,0700);
+	    while((arret = archive_read_data_block(
+			    ar,&buf,&size,&off)) != ARCHIVE_EOF){
+		if(arret != ARCHIVE_OK){
+		    close(fd);
+		    ret = -1;
+		    goto end;
+		}
+
+		write(fd,buf,size);    
+	    }
+	    close(fd);
+	}
+    }
+    
+end:
+
+    archive_read_close(ar);
+    archive_read_free(ar);
+    
+    return ret;
+
+}
+
 int chal_comp(chal_compret_handler ret_handler,void *chalpri,
 	const char *code_path,const char *out_path){
     struct comp_data *cdata = NULL;
@@ -125,7 +192,7 @@ int chal_comp(chal_compret_handler ret_handler,void *chalpri,
     }
     cdata->cont_id = contid;
 
-    snprintf(path,PATH_MAX + 1,"container/%d/code/main.cpp",contid);
+    snprintf(path,PATH_MAX + 1,"container/%d/pack.tar.xz",contid);
     if(copy_file(path,code_path)){
 	goto err;
     }
@@ -185,9 +252,12 @@ static int exec_comp(struct comp_data *cdata){
     char *envp[] = {"PATH=/usr/bin",NULL};
     
     sem_wait(cdata->lock);
-
+    
     if(fog_cont_attach(cdata->cont_id)){
         exit(1);
+    }
+    if(extract_pack("/code","/pack.tar.xz")){
+	exit(1);
     }
 
     execve("/usr/bin/g++",args,envp);

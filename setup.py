@@ -14,7 +14,8 @@ pyext_module = Extension('pyext',
             'src/ev.c',
             'src/io.c'
         ],
-        include_dirs = ["include"])
+        include_dirs = ['include'],
+        libraries = ['archive'])
 
 setup(name = 'pyext',
         version = '1.0',
