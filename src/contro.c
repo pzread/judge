@@ -192,8 +192,9 @@ int chal_comp(chal_compret_handler ret_handler,void *chalpri,
     }
     cdata->cont_id = contid;
 
-    snprintf(path,PATH_MAX + 1,"container/%d/pack.tar.xz",contid);
+    snprintf(path,PATH_MAX + 1,"container/%d/code/main.cpp",contid);
     if(copy_file(path,code_path)){
+        printf("test\n");
 	goto err;
     }
     chown(path,FOG_CONT_UID,FOG_CONT_GID);
@@ -247,7 +248,7 @@ err:
     return -1;
 }
 static int exec_comp(struct comp_data *cdata){
-    char *args[] = {"g++","-O2","-std=c++0x",
+    char *args[] = {"clang++","-O2","-std=c++0x",
         "/code/main.cpp","-o","/out/a.out",NULL};
     char *envp[] = {"PATH=/usr/bin",NULL};
     
@@ -256,9 +257,9 @@ static int exec_comp(struct comp_data *cdata){
     if(fog_cont_attach(cdata->cont_id)){
         exit(1);
     }
-    if(extract_pack("/code","/pack.tar.xz")){
+    /*if(extract_pack("/code","/pack.tar.xz")){
 	exit(1);
-    }
+    }*/
 
     execve("/usr/bin/g++",args,envp);
     return 0;
@@ -310,6 +311,7 @@ int chal_run(chal_runret_handler ret_handler,void* chalpri,
 		    MAP_SHARED | MAP_ANONYMOUS,-1,0)) == NULL){
         goto err;
     }
+
     sem_init(rdata->lock,1,0);
 
     if((contid = fog_cont_alloc("run")) < 0){

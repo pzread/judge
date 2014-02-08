@@ -1,4 +1,3 @@
-import tornado.web
 import pyext
 
 STATUS_NONE = 0
@@ -10,33 +9,25 @@ STATUS_MLE = 5
 STATUS_CE = 6
 STATUS_ERR = 7
 
-last_chal_id = 0
-
-def emit_chal():
-    global last_chal_id
-
+def emit_test(chal_desc):
     def _comp_cb(status):
         if status != STATUS_NONE:
             _end(status,0,0)
             return
         
-        print('[%.6d] compile pass'%chalid)
-        pyext.chal_run(_end,"tmp/run/a.out",timelimit,memlimit)
+        print('[%.6d] compile pass'%chal_id)
+        pyext.chal_run(_end,"tmp/run/%d/a.out"%chal_id,timelimit,memlimit)
 
     def _end(status,runtime,memory):
         print('[%.6d] status:%d runtime:%d memory:%d'%(
-                chalid,status,runtime,memory))
+                chal_id,status,runtime,memory))
 
-    last_chal_id += 1 
-    chalid = last_chal_id;
+    chal_id = chal_desc['chal_id']
+    timelimit = chal_desc['timelimit']
+    memlimit = chal_desc['memlimit'] * 1024
+    code_path = chal_desc['code_path']
+    res_path = chal_desc['res_path']
 
-    timelimit = 4000
-    memlimit = 65536 * 1024
-    
-    pyext.chal_comp(_comp_cb,"tmp/res/asdf.tar.xz","tmp/run/a.out")
+    print(code_path)
 
-class ChalAddHandler(tornado.web.RequestHandler):
-    def get(self):
-        #emit_chal()
-
-        self.write('Hello World')
+    pyext.chal_comp(_comp_cb,code_path,"tmp/run/%d/a.out"%chal_id)

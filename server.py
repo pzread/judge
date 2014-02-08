@@ -4,7 +4,7 @@ import json
 import uuid
 import tornado.ioloop
 import tornado.web
-import tornado.websocket
+from tornado.websocket import WebSocketHandler
 from tornado.gen import coroutine
 
 import pyext
@@ -112,13 +112,21 @@ class TestChalHandler(tornado.web.RequestHandler):
 
         f.close()
 
+class JudgeHandler(WebSocketHandler):
+    def open(self):
+        pass
+
+    def on_message(self,msg):
+        chal.emit_test(json.loads(msg,'utf-8'))
+
+    def on_close(self):
+        pass
+
 if __name__ == '__main__':
     tornado.ioloop.IOLoop.configure(EPollIOLoop)
 
     app = tornado.web.Application([
-        ('/dsd',DescHandler),
-        ('/dsb',BinaHandler),
-        ('/test_chal',TestChalHandler),
+        ('/judge',JudgeHandler),
     ])
     app.listen(2501)
 
