@@ -13,6 +13,8 @@ STATUS_ERR = 7
 
 def emit_test(chal_desc,ws):
     def _comp_cb(status):
+        nonlocal test_map
+
         if status != STATUS_NONE:
             for test in tests:
                 _end(test['test_idx'],status,0,0)
@@ -24,14 +26,18 @@ def emit_test(chal_desc,ws):
         for test in tests:
             test_idx = test['test_idx']
             data = test['data']
+            test_map[test_idx]['remain'] = len(data)
 
             for data_id in data:
-                pyext.chal_run(lambda status,runtime,memory : _end(
-                    test_idx,status,runtime,memory),
-                    "tmp/run/%d/a.out"%chal_id,
-                    timelimit,memlimit,
-                    '%s/%d.in'%(res_path,data_id),
-                    '%s/%d.out'%(res_path,data_id))
+                _run(test_idx,'tmp/run/%d/a.out'%chal_id,
+                        timelimit,memlimit,
+                        '%s/%d.in'%(res_path,data_id),
+                        '%s/%d.out'%(res_path,data_id))
+   
+    def _run(test_idx,run_path,timelimit,memlimit,in_path,ans_path):
+        pyext.chal_run(lambda status,runtime,memory : _end(
+            test_idx,status,runtime,memory),run_path,
+            timelimit,memlimit,in_path,ans_path)
 
     def _end(test_idx,status,runtime,memory):
         nonlocal test_map
@@ -41,6 +47,7 @@ def emit_test(chal_desc,ws):
         test['status'] = max(test['status'],status) 
         test['runtime'] += runtime
         test['memory'] = max(test['memory'],memory)
+
         if test['remain'] > 0:
             return
 
@@ -66,15 +73,16 @@ def emit_test(chal_desc,ws):
 
     try:
         os.removedirs("tmp/run/%d"%chal_id)
-        os.mkdir("tmp/run/%d"%chal_id)
 
     except OSError:
         pass
-    
+
+    os.mkdir("tmp/run/%d"%chal_id)
+
     test_map = {}
     for test in tests:
         test_map[test['test_idx']] = {
-            'remain':len(test['data']),
+            'remain':0,
             'status':STATUS_NONE,
             'runtime':0,
             'memory':0
