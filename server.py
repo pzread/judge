@@ -117,7 +117,7 @@ class JudgeHandler(WebSocketHandler):
         pass
 
     def on_message(self,msg):
-        chal.emit_test(json.loads(msg,'utf-8'))
+        chal.emit_test(json.loads(msg,'utf-8'),self)
 
     def on_close(self):
         pass
