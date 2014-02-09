@@ -292,7 +292,8 @@ static void handle_compsig(struct task *task,siginfo_t *siginfo){
     free(cdata);
 }
 int chal_run(chal_runret_handler ret_handler,void* chalpri,
-	const char *run_path,unsigned long timelimit,unsigned long memlimit){
+	const char *run_path,unsigned long timelimit,unsigned long memlimit,
+        const char *in_path,const char *ans_path){
     struct run_data *rdata = NULL;
     struct io_header *iohdr = NULL;
     int contid = -1; 
@@ -330,7 +331,7 @@ int chal_run(chal_runret_handler ret_handler,void* chalpri,
     }
     chown(path,FOG_CONT_UID,FOG_CONT_GID);
 
-    if((iohdr = io_stdfile_alloc("testdata/1/in","testdata/1/ans")) == NULL){
+    if((iohdr = io_stdfile_alloc(in_path,ans_path)) == NULL){
 	goto err;
     }
     iohdr->end_data = rdata;

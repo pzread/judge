@@ -1,3 +1,4 @@
+import os
 import pyext
 
 STATUS_NONE = 0
@@ -16,7 +17,14 @@ def emit_test(chal_desc):
             return
         
         print('[%.6d] compile pass'%chal_id)
-        pyext.chal_run(_end,"tmp/run/%d/a.out"%chal_id,timelimit,memlimit)
+
+        for test in tests:
+            data = test['data']
+            for data_id in data:
+                pyext.chal_run(_end,"tmp/run/%d/a.out"%chal_id,
+                        timelimit,memlimit,
+                        '%s/%d.in'%(res_path,data_id),
+                        '%s/%d.out'%(res_path,data_id))
 
     def _end(status,runtime,memory):
         print('[%.6d] status:%d runtime:%d memory:%d'%(
@@ -25,9 +33,15 @@ def emit_test(chal_desc):
     chal_id = chal_desc['chal_id']
     timelimit = chal_desc['timelimit']
     memlimit = chal_desc['memlimit'] * 1024
+    tests = chal_desc['tests']
     code_path = chal_desc['code_path']
     res_path = chal_desc['res_path']
 
-    print(code_path)
+    try:
+        os.removedirs("tmp/run/%d"%chal_id)
+        os.mkdir("tmp/run/%d"%chal_id)
+
+    except OSError:
+        pass
 
     pyext.chal_comp(_comp_cb,code_path,"tmp/run/%d/a.out"%chal_id)

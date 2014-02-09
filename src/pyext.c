@@ -332,15 +332,18 @@ static PyObject* pyext_chal_run(PyObject *self,PyObject *args){
     const char *runpath;
     unsigned long timelimit;
     unsigned long memlimit;
+    const char *inpath;
+    const char *anspath;
 
-    if(!PyArg_ParseTuple(args,"Oskk",&callback,&runpath,&timelimit,&memlimit)){
+    if(!PyArg_ParseTuple(args,"Oskkss",&callback,&runpath,&timelimit,&memlimit,
+                &inpath,&anspath)){
         PyErr_BadArgument();
         return NULL;
     }
 
     Py_XINCREF(callback);
     chal_run((chal_runret_handler)handle_chal_runret,callback,
-	    runpath,timelimit,memlimit);
+	    runpath,timelimit,memlimit,inpath,anspath);
 
     Py_INCREF(Py_None);
     return Py_None;
