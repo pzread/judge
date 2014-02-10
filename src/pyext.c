@@ -312,17 +312,20 @@ static struct ev_header* evhdr_getby_fd(khash_t(ptr) *evhdr_ht,int fd){
 
 static PyObject* pyext_chal_comp(PyObject *self,PyObject *args){
     PyObject *callback;
+    int comp_type;
+    const char *respath;
     const char *codepath;
     const char *outpath;
 
-    if(!PyArg_ParseTuple(args,"Oss",&callback,&codepath,&outpath)){
+    if(!PyArg_ParseTuple(args,"Oisss",&callback,&comp_type,
+                &respath,&codepath,&outpath)){
         PyErr_BadArgument();
         return NULL;
     }
 
     Py_XINCREF(callback);
     chal_comp((chal_compret_handler)handle_chal_compret,callback,
-	    codepath,outpath);
+            comp_type,respath,codepath,outpath);
 
     Py_INCREF(Py_None);
     return Py_None;
@@ -335,8 +338,8 @@ static PyObject* pyext_chal_run(PyObject *self,PyObject *args){
     const char *inpath;
     const char *anspath;
 
-    if(!PyArg_ParseTuple(args,"Oskkss",&callback,&runpath,&timelimit,&memlimit,
-                &inpath,&anspath)){
+    if(!PyArg_ParseTuple(args,"Oskkss",&callback,&runpath,
+                &timelimit,&memlimit,&inpath,&anspath)){
         PyErr_BadArgument();
         return NULL;
     }

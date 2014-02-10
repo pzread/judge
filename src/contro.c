@@ -4,10 +4,13 @@
 #define COMPILE_MEMLIMIT (256 * 1024 * 1024)
 #define RUN_MEMLIMIT (256 * 1024 * 1024)
 
+#define COMPTYPE_CLANGXX 0
+#define COMPTYPE_MAKEFILE 1
 #define CHALL_ST_PEND 0
 #define CHALL_ST_COMP 1
 #define CHALL_ST_RUN 2
 #define CHALL_ST_EXIT 3
+
 #define RLIMIT_UTIME 16
 
 #include<stdio.h>
@@ -19,6 +22,7 @@
 #include<sched.h>
 #include<fcntl.h>
 #include<unistd.h>
+#include<dirent.h>
 #include<semaphore.h>
 #include<sys/mman.h>
 #include<sys/ioctl.h>
@@ -40,6 +44,7 @@ struct comp_data{
 
     void *chal_private;
     chal_compret_handler ret_handler;
+    int comp_type;
 };
 struct run_data{
     int cont_id;
@@ -61,7 +66,7 @@ struct run_data{
 };
 
 static int copy_file(const char *dst,const char *src);
-static int extract_pack(const char *dst,const char *pack);
+//static int extract_pack(const char *dst,const char *pack);
 static int exec_comp(struct comp_data *cdata);
 static void handle_compsig(struct task *task,siginfo_t *siginfo);
 static int exec_run(struct run_data *rdata);
@@ -99,7 +104,8 @@ end:
 
     return ret;
 }
-static int extract_pack(const char *dst,const char *pack){
+    
+/*static int extract_pack(const char *dst,const char *pack){
     int ret = 0;
 
     struct archive *ar;
@@ -161,10 +167,11 @@ end:
     
     return ret;
 
-}
+}*/
 
-int chal_comp(chal_compret_handler ret_handler,void *chalpri,
-	const char *code_path,const char *out_path){
+int chal_comp(chal_compret_handler ret_handler,void *chalpri,int comp_type,
+        const char *res_path,const char *code_path,const char *out_path){
+
     struct comp_data *cdata = NULL;
     int contid = -1; 
     char path[PATH_MAX + 1];
@@ -177,6 +184,7 @@ int chal_comp(chal_compret_handler ret_handler,void *chalpri,
     }
     cdata->chal_private = chalpri;
     cdata->ret_handler = ret_handler;
+    cdata->comp_type = comp_type;
 
     if((cdata->lock = mmap(NULL,sizeof(*cdata->lock),PROT_READ | PROT_WRITE,
 		    MAP_SHARED | MAP_ANONYMOUS,-1,0)) == NULL){
@@ -194,10 +202,32 @@ int chal_comp(chal_compret_handler ret_handler,void *chalpri,
 
     snprintf(path,PATH_MAX + 1,"container/%d/code/main.cpp",contid);
     if(copy_file(path,code_path)){
-        printf("test\n");
 	goto err;
     }
     chown(path,FOG_CONT_UID,FOG_CONT_GID);
+
+    if(comp_type == COMPTYPE_MAKEFILE){
+        DIR *dirp;
+        struct dirent *entry;
+        char src[PATH_MAX + 1];
+        char dst[PATH_MAX + 1];
+
+        snprintf(path,PATH_MAX + 1,"%s/make",res_path);
+        dirp = opendir(path);
+        while((entry = readdir(dirp)) != NULL){
+	    if(!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")){
+                continue;
+            }
+
+            snprintf(src,PATH_MAX + 1,"%s/make/%s",res_path,entry->d_name);
+            snprintf(dst,PATH_MAX + 1,"container/%d/code/%s",
+                    contid,entry->d_name);
+            copy_file(dst,src);
+            chown(dst,FOG_CONT_UID,FOG_CONT_GID);
+        }
+        closedir(dirp);
+    }
+
     strncpy(cdata->out_path,out_path,PATH_MAX);
     cdata->out_path[PATH_MAX] = '\0';
 
@@ -248,10 +278,13 @@ err:
     return -1;
 }
 static int exec_comp(struct comp_data *cdata){
-    char *args[] = {"clang++","-O2","-std=c++0x",
+    char *clangxx_args[] = {"clang++","-O2","-std=c++1y",
         "/code/main.cpp","-o","/out/a.out",NULL};
-    char *envp[] = {"PATH=/usr/bin",NULL};
-    
+    char *clangxx_envp[] = {"PATH=/usr/bin",NULL};
+
+    char *make_args[] = {"make",NULL};
+    char *make_envp[] = {"PATH=/usr/bin","OUT=/out/a.out",NULL};
+
     sem_wait(cdata->lock);
     
     if(fog_cont_attach(cdata->cont_id)){
@@ -261,7 +294,19 @@ static int exec_comp(struct comp_data *cdata){
 	exit(1);
     }*/
 
-    execve("/usr/bin/g++",args,envp);
+    switch(cdata->comp_type){
+        case COMPTYPE_CLANGXX:
+            execve("/usr/bin/clang++",clangxx_args,clangxx_envp);
+            break;
+
+        case COMPTYPE_MAKEFILE:
+            chdir("/code");
+            execve("/usr/bin/make",make_args,make_envp);
+            break;
+
+        default:
+            exit(1);
+    }
     return 0;
 }
 static void handle_compsig(struct task *task,siginfo_t *siginfo){
