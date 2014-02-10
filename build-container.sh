@@ -12,6 +12,7 @@ cp /usr/bin/g++ $1/usr/bin/g++
 cp /usr/bin/clang++ $1/usr/bin/clang++
 cp /usr/bin/as $1/usr/bin/as
 cp /usr/bin/ld $1/usr/bin/ld
+cp /usr/bin/make $1/usr/bin/make
 cp /usr/lib/libopcodes-2.24-system.so $1/usr/lib/libopcodes-2.24-system.so
 cp /usr/lib/libbfd-2.24-system.so $1/usr/lib/libbfd-2.24-system.so
 cp -a /usr/lib/x86_64-linux-gnu $1/usr/lib/x86_64-linux-gnu

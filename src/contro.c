@@ -264,7 +264,7 @@ err:
         munmap(stack,EXEC_STACKSIZE);
     }
     if(contid != -1){
-	fog_cont_free(contid);
+        fog_cont_free(contid);
     }
     if(cdata != NULL){
 	if(cdata->lock != NULL){

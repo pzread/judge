@@ -324,8 +324,11 @@ static PyObject* pyext_chal_comp(PyObject *self,PyObject *args){
     }
 
     Py_XINCREF(callback);
-    chal_comp((chal_compret_handler)handle_chal_compret,callback,
-            comp_type,respath,codepath,outpath);
+    if(chal_comp((chal_compret_handler)handle_chal_compret,callback,
+            comp_type,respath,codepath,outpath))
+
+        PyErr_SetString(PyExc_SystemError,"challenge compile failed");
+    }
 
     Py_INCREF(Py_None);
     return Py_None;
@@ -345,8 +348,11 @@ static PyObject* pyext_chal_run(PyObject *self,PyObject *args){
     }
 
     Py_XINCREF(callback);
-    chal_run((chal_runret_handler)handle_chal_runret,callback,
-	    runpath,timelimit,memlimit,inpath,anspath);
+    if(chal_run((chal_runret_handler)handle_chal_runret,callback,
+	    runpath,timelimit,memlimit,inpath,anspath)){
+
+        PyErr_SetString(PyExc_SystemError,"challenge run failed");
+    }
 
     Py_INCREF(Py_None);
     return Py_None;
