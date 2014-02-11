@@ -1,4 +1,5 @@
 import os
+import shutil
 import json
 import pyext
 
@@ -26,7 +27,7 @@ def emit_test(chal_desc,ws):
         for test_idx,test in testm.items():
             timelimit = test['timelimit']
             memlimit = test['memlimit']
-            metadata = json.loads(test['metadata'],'utf-8')
+            metadata = test['metadata']
 
             testm[test_idx]['remain'] = len(metadata['data'])
 
@@ -86,7 +87,7 @@ def emit_test(chal_desc,ws):
         testm[test['test_idx']] = test
 
     try:
-        os.removedirs("tmp/run/%d"%chal_id)
+        shutil.rmtree("tmp/run/%d"%chal_id)
     except OSError:
         pass
     os.mkdir("tmp/run/%d"%chal_id)
