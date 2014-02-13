@@ -6,6 +6,7 @@
 
 #define COMPTYPE_CLANGXX 0
 #define COMPTYPE_MAKEFILE 1
+#define COMPTYPE_GXX 2
 #define CHALL_ST_PEND 0
 #define CHALL_ST_COMP 1
 #define CHALL_ST_RUN 2
@@ -213,7 +214,10 @@ int chal_comp(chal_compret_handler ret_handler,void *chalpri,int comp_type,
         char dst[PATH_MAX + 1];
 
         snprintf(path,PATH_MAX + 1,"%s/make",res_path);
-        dirp = opendir(path);
+        if((dirp = opendir(path)) == NULL){
+	    goto err;
+	}
+
         while((entry = readdir(dirp)) != NULL){
 	    if(!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")){
                 continue;
@@ -225,6 +229,7 @@ int chal_comp(chal_compret_handler ret_handler,void *chalpri,int comp_type,
             copy_file(dst,src);
             chown(dst,FOG_CONT_UID,FOG_CONT_GID);
         }
+
         closedir(dirp);
     }
 
@@ -285,6 +290,10 @@ static int exec_comp(struct comp_data *cdata){
     char *make_args[] = {"make",NULL};
     char *make_envp[] = {"PATH=/usr/bin","OUT=/out/a.out",NULL};
 
+    char *gxx_args[] = {"g++","-O2","-std=c++1y",
+        "/code/main.cpp","-o","/out/a.out",NULL};
+    char *gxx_envp[] = {"PATH=/usr/bin",NULL};
+
     sem_wait(cdata->lock);
     
     if(fog_cont_attach(cdata->cont_id)){
@@ -302,6 +311,10 @@ static int exec_comp(struct comp_data *cdata){
         case COMPTYPE_MAKEFILE:
             chdir("/code");
             execve("/usr/bin/make",make_args,make_envp);
+            break;
+
+        case COMPTYPE_GXX:
+            execve("/usr/bin/g++",gxx_args,gxx_envp);
             break;
 
         default:

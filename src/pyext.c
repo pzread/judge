@@ -325,7 +325,7 @@ static PyObject* pyext_chal_comp(PyObject *self,PyObject *args){
 
     Py_XINCREF(callback);
     if(chal_comp((chal_compret_handler)handle_chal_compret,callback,
-            comp_type,respath,codepath,outpath))
+            comp_type,respath,codepath,outpath)){
 
         PyErr_SetString(PyExc_SystemError,"challenge compile failed");
     }

@@ -72,11 +72,15 @@ def emit_test(chal_desc,ws):
     res_path = chal_desc['res_path']
     code_path = chal_desc['code_path']
 
-    if testl[0]['comp_type'] == 'clang++':
+    typ = testl[0]['comp_type']
+    if typ == 'clang++':
         comp_type = 0
 
-    elif testl[0]['comp_type'] == 'makefile':
+    elif typ == 'makefile':
         comp_type = 1
+
+    elif typ == 'g++':
+        comp_type = 2
 
     testm = {}
     for test in testl:
