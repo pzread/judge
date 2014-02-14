@@ -283,18 +283,22 @@ err:
     return -1;
 }
 static int exec_comp(struct comp_data *cdata){
+    int nullfd;
+
     char *clangxx_args[] = {"clang++","-O2","-std=c++1y",
-        "/code/main.cpp","-o","/out/a.out",NULL};
+        "/code/main.cpp","-o","/out/a.out","-q",NULL};
     char *clangxx_envp[] = {"PATH=/usr/bin",NULL};
 
-    char *make_args[] = {"make",NULL};
+    char *make_args[] = {"make","-s",NULL};
     char *make_envp[] = {"PATH=/usr/bin","OUT=/out/a.out",NULL};
 
     char *gxx_args[] = {"g++","-O2","-std=c++1y",
-        "/code/main.cpp","-o","/out/a.out",NULL};
+        "/code/main.cpp","-o","/out/a.out","-q",NULL};
     char *gxx_envp[] = {"PATH=/usr/bin",NULL};
 
     sem_wait(cdata->lock);
+
+    nullfd = open("/dev/null",O_WRONLY);
     
     if(fog_cont_attach(cdata->cont_id)){
         exit(1);
@@ -302,6 +306,9 @@ static int exec_comp(struct comp_data *cdata){
     /*if(extract_pack("/code","/pack.tar.xz")){
 	exit(1);
     }*/
+
+    dup2(nullfd,1);
+    dup2(nullfd,2);
 
     switch(cdata->comp_type){
         case COMPTYPE_CLANGXX:

@@ -2,6 +2,8 @@ import os
 import shutil
 import json
 import pyext
+from collections import deque
+from tornado.ioloop import IOLoop
 
 STATUS_NONE = 0
 STATUS_AC = 1
@@ -17,14 +19,14 @@ def emit_test(chal_desc,ws):
         nonlocal testm
 
         if status != STATUS_NONE:
-            for test_idx in testm.keys():
-                _end(test_idx,status,0,0)
+            for test_idx in list(testm.keys()):
+                IOLoop.instance().add_callback(_end,test_idx,status,0,0)
 
             return
         
         print('[%.6d] compile pass'%chal_id)
 
-        for test_idx,test in testm.items():
+        for test_idx,test in list(testm.items()):
             timelimit = test['timelimit']
             memlimit = test['memlimit']
             metadata = test['metadata']
@@ -32,15 +34,17 @@ def emit_test(chal_desc,ws):
             testm[test_idx]['remain'] = len(metadata['data'])
 
             for data_id in metadata['data']:
-                _run(test_idx,'tmp/run/%d/a.out'%chal_id,
-                        timelimit,memlimit,
-                        '%s/testdata/%d.in'%(res_path,data_id),
-                        '%s/testdata/%d.out'%(res_path,data_id))
-   
-    def _run(test_idx,run_path,timelimit,memlimit,in_path,ans_path):
-        pyext.chal_run(lambda status,runtime,memory : _end(
-            test_idx,status,runtime,memory),run_path,
-            timelimit,memlimit,in_path,ans_path)
+                _run(chal_id,test_idx,data_id,res_path,timelimit,memlimit)
+                
+    def _run(chal_id,test_idx,data_id,res_path,timelimit,memlimit):
+        pyext.chal_run(
+                lambda status,runtime,memory : IOLoop.instance().add_callback(
+                    _end,test_idx,status,runtime,memory),
+                'tmp/run/%d/a.out'%chal_id,
+                timelimit,
+                memlimit,
+                '%s/testdata/%d.in'%(res_path,data_id),
+                '%s/testdata/%d.out'%(res_path,data_id))
 
     def _end(test_idx,status,runtime,memory):
         nonlocal testm
@@ -66,6 +70,7 @@ def emit_test(chal_desc,ws):
             'runtime':test['runtime'],
             'memory':test['memory']
         }))
+
 
     chal_id = chal_desc['chal_id']
     testl = chal_desc['testl']
@@ -96,5 +101,6 @@ def emit_test(chal_desc,ws):
         pass
     os.mkdir("tmp/run/%d"%chal_id)
 
-    pyext.chal_comp(_comp_cb,comp_type,res_path,code_path,
-            "tmp/run/%d/a.out"%chal_id)
+    pyext.chal_comp(
+            lambda status : IOLoop.instance().add_callback(_comp_cb,status),
+            comp_type,res_path,code_path,"tmp/run/%d/a.out"%chal_id)

@@ -114,7 +114,7 @@ int fog_cont_alloc(const char *snap){
     if(mkdir(path,0700)){
 	return -1;
     }
-    strncat(path,"/memory.limit_in_bytes",PATH_MAX);
+    strncat(path,"/memory.memsw.limit_in_bytes",PATH_MAX);
     if(stat(path,&st)){
 	return -1;
     }
@@ -125,9 +125,16 @@ int fog_cont_set(int id,unsigned long memlimit){
     char path[PATH_MAX + 1];
     FILE *f;
 
-    snprintf(path,PATH_MAX + 1,"cgroup/memory/%s_%d/memory.limit_in_bytes",
-	    CONTPREFIX,id);
+    snprintf(path,PATH_MAX + 1,
+            "cgroup/memory/%s_%d/memory.limit_in_bytes",CONTPREFIX,id);
+    if((f = fopen(path,"w")) == NULL){
+	return -1;
+    }
+    fprintf(f,"%lu",memlimit);
+    fclose(f);
 
+    snprintf(path,PATH_MAX + 1,
+            "cgroup/memory/%s_%d/memory.memsw.limit_in_bytes",CONTPREFIX,id);
     if((f = fopen(path,"w")) == NULL){
 	return -1;
     }

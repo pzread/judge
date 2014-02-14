@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 
 #define NLA_DATA(x) ((char*)(x) + NLA_HDRLEN)
-#define RECVBUF_SIZE 65536
+#define RECVBUF_SIZE 64 * 1024 * 1024
 #define RECVTYPE_NLHDR 0
 #define RECVTYPE_NLERR 1
 #define RECVTYPE_PAYLOAD 2
@@ -40,6 +40,7 @@ static char recvbuf[RECVBUF_SIZE];
 int task_init(void){
     int ret;
 
+    int size;
     sigset_t sigset;
     struct sockaddr_nl sa;
     struct nlmsghdr *nlhdr;
@@ -62,6 +63,12 @@ int task_init(void){
     }
     
     sockfd = socket(AF_NETLINK,SOCK_RAW | SOCK_CLOEXEC,NETLINK_GENERIC);
+    
+    size = RECVBUF_SIZE;
+    if(setsockopt(sockfd,SOL_SOCKET,SO_RCVBUF,&size,sizeof(size))){
+        goto err;
+    }
+
     memset(&sa,0,sizeof(sa));
     sa.nl_family = AF_NETLINK;
     if(bind(sockfd,(struct sockaddr*)&sa,sizeof(sa))){
