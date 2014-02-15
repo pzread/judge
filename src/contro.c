@@ -289,11 +289,11 @@ static int exec_comp(struct comp_data *cdata){
         "/code/main.cpp","-o","/out/a.out","-q",NULL};
     char *clangxx_envp[] = {"PATH=/usr/bin",NULL};
 
-    char *make_args[] = {"make","-s",NULL};
+    char *make_args[] = {"make",NULL};
     char *make_envp[] = {"PATH=/usr/bin","OUT=/out/a.out",NULL};
 
     char *gxx_args[] = {"g++","-O2","-std=c++1y",
-        "/code/main.cpp","-o","/out/a.out","-q",NULL};
+        "/code/main.cpp","-o","/out/a.out",NULL};
     char *gxx_envp[] = {"PATH=/usr/bin",NULL};
 
     sem_wait(cdata->lock);
@@ -463,6 +463,11 @@ err:
     return -1;
 }
 static int exec_run(struct run_data *rdata){
+    DIR *dirp;
+    int expfd;
+    struct dirent *entry;
+    long int fd;
+
     struct rlimit limit;
     char *args[] = {"a.out",NULL};
     char *envp[] = {NULL};
@@ -472,7 +477,32 @@ static int exec_run(struct run_data *rdata){
     if(IO_EXEC(rdata->iohdr)){
 	exit(1); 
     }
-    
+
+    if((dirp = opendir("/proc/self/fd")) == NULL){
+	exit(1); 
+    }
+    expfd = dirfd(dirp);
+
+    while((entry = readdir(dirp)) != NULL){
+        if(!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")){
+            continue;
+        }
+        
+        fd = strtol(entry->d_name,NULL,10);
+        if(fd == LONG_MAX || fd == LONG_MIN){
+            closedir(dirp);
+            exit(1);
+        }
+
+        if(fd > 2 && fd != (long int)expfd){
+            if(close((int)fd)){
+                closedir(dirp);
+                exit(1);
+            }
+        }
+    }
+    closedir(dirp);
+
     if(fog_cont_attach(rdata->cont_id)){
         exit(1);
     }
@@ -540,7 +570,9 @@ static void handle_runend(struct run_data *rdata,int status){
 		rdata->status,rdata->runtime,rdata->memory);
 
 	IO_FREE(rdata->iohdr);
-	fog_cont_free(rdata->cont_id);
+	if(fog_cont_free(rdata->cont_id)){
+            printf("fog cont free failed\n");
+        }
 	sem_destroy(rdata->lock);
 	munmap(rdata->lock,sizeof(*rdata->lock));
 	free(rdata);

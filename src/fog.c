@@ -149,15 +149,18 @@ int fog_cont_free(int id){
 
     snprintf(name,BTRFS_PATH_NAME_MAX + 1,"%d",id);
     if(snap_delete("container",name)){
+        printf("  error 1\n");
 	return -1;
     }
 
     snprintf(path,PATH_MAX + 1,"cgroup/cpu,cpuacct/%s_%d",CONTPREFIX,id);
     if(rmdir(path)){
+        printf("  error 2\n");
 	return -1;
     }
     snprintf(path,PATH_MAX + 1,"cgroup/memory/%s_%d",CONTPREFIX,id);
     if(rmdir(path)){
+        printf("  error 3\n");
 	return -1;
     }
 
