@@ -3,6 +3,7 @@
 #include<stdint.h>
 #include<unistd.h>
 #include<sys/timerfd.h>
+#include<sys/epoll.h>
 
 #include"def.h"
 #include"ev.h"
@@ -25,6 +26,9 @@ struct timer* timer_alloc(void){
 
     timer->evhdr.fd = timer->fd;
     timer->evhdr.handler = handle_alarm;
+    if(ev_register(&timer->evhdr,EPOLLIN)){
+	goto err;
+    }
 
     return timer;
 
@@ -61,8 +65,11 @@ int timer_set(struct timer *timer,time_t initial,time_t interval){
 
 static void handle_alarm(struct ev_header *evhdr,uint32_t events){
     struct timer *timer;   
+    uint64_t count;
 
     timer = container_of(evhdr,struct timer,evhdr);
+    read(timer->fd,&count,sizeof(count));
+
     if(timer->alarm_handler != NULL){
 	timer->alarm_handler(timer);
     }

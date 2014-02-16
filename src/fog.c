@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #define CONTPREFIX "fog"
+#define DLYFREE_MAX 1024
 
 #include<stdio.h>
 #include<stdlib.h>
@@ -30,10 +31,14 @@ struct fog_cont{
 	int flag,struct FTW *ftwbuf);*/
 static int chown_contdir(const char *path,const struct stat *st,
 	int flag,struct FTW *ftwbuf);
-static void handle_delayfree(struct timer *timer);
+static void handle_dlyfree(struct timer *timer);
 
 static int last_cont_id = 0;
-static struct timer *delayfree_timer;
+static struct timer *dlyfree_timer = NULL;
+static int dlyfree_timer_flag = 0;
+static int dlyfree_queue[DLYFREE_MAX];
+static int dlyfree_queue_head = 0;
+static int dlyfree_queue_tail = 0;
 
 int fog_init(void){
     DIR *dirp;
@@ -73,11 +78,14 @@ int fog_init(void){
 	return -1;
     }
 
-    if((delayfree_timer = timer_alloc()) == NULL){
+    if((dlyfree_timer = timer_alloc()) == NULL){
         return -1;
     }
-    timer_set(delayfree_timer,0,0);
-    delayfree_timer->alarm_handler = handle_delayfree;
+    timer_set(dlyfree_timer,0,0);
+    dlyfree_timer->alarm_handler = handle_dlyfree;
+    dlyfree_timer_flag = 0;
+    dlyfree_queue_head = 0;
+    dlyfree_queue_tail = 0;
 
     return 0;
 }
@@ -233,30 +241,99 @@ int fog_cont_attach(int id){
 }
 
 int fog_cont_free(int id){
+    char state;
     char name[BTRFS_PATH_NAME_MAX + 1];
     char path[PATH_MAX + 1];
 
     snprintf(name,BTRFS_PATH_NAME_MAX + 1,"%d",id);
     if(snap_delete("container",name)){
         printf("  error 1\n");
-	return -1;
+
+	state = 0;
+	goto err;
     }
 
     snprintf(path,PATH_MAX + 1,"cgroup/cpu,cpuacct/%s_%d",CONTPREFIX,id);
     if(rmdir(path)){
         printf("  error 2\n");
-	return -1;
+
+	state = 1;
+	goto err;
     }
     snprintf(path,PATH_MAX + 1,"cgroup/memory/%s_%d",CONTPREFIX,id);
     if(rmdir(path)){
         printf("  error 3\n");
-	return -1;
+
+	state = 2;
+	goto err;
+    }
+
+    return 0;
+
+err:
+
+    dlyfree_queue[dlyfree_queue_tail] = (id << 2) | state;
+    dlyfree_queue_tail = (dlyfree_queue_tail + 1) % DLYFREE_MAX;
+    if(dlyfree_timer_flag == 0){
+	timer_set(dlyfree_timer,1,2);
+	dlyfree_timer_flag = 1;
     }
 
     return 0;
 }
-static void handle_delayfree(struct timer *timer){
+static void handle_dlyfree(struct timer *timer){
+    int old_tail;
+    int id;
+    char state;
+    char name[BTRFS_PATH_NAME_MAX + 1];
+    char path[PATH_MAX + 1];
+
+    printf("  delay free\n");
+
+    old_tail = dlyfree_queue_tail;
+    while(dlyfree_queue_head != old_tail){
+	id = dlyfree_queue[dlyfree_queue_head] >> 2;
+	state = dlyfree_queue[dlyfree_queue_head] & 3;
+
+	if(state <= 0){
+	    snprintf(name,BTRFS_PATH_NAME_MAX + 1,"%d",id);
+	    if(snap_delete("container",name)){
+		printf("  error 4\n");
+		goto err;
+	    }
+	}
+	if(state <= 1){
+	    snprintf(path,PATH_MAX + 1,"cgroup/cpu,cpuacct/%s_%d",
+		    CONTPREFIX,id);
+	    if(rmdir(path)){
+		printf("  error 5\n");
+		goto err;
+	    }
+	}
+	if(state <= 2){
+	    snprintf(path,PATH_MAX + 1,"cgroup/memory/%s_%d",CONTPREFIX,id);
+	    if(rmdir(path)){
+		printf("  error 6\n");
+		goto err;
+	    }
+	}
+
+	goto end;
+
+err:
     
+	dlyfree_queue[dlyfree_queue_tail] = (id << 2) | state;
+	dlyfree_queue_tail = (dlyfree_queue_tail + 1) % DLYFREE_MAX;
+
+end:
+
+	dlyfree_queue_head = (dlyfree_queue_head + 1) % DLYFREE_MAX;
+    }
+    
+    if(dlyfree_queue_head == dlyfree_queue_tail){
+	timer_set(dlyfree_timer,0,0);
+	dlyfree_timer_flag = 0;
+    }
 }
 
 /*
