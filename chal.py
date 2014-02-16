@@ -5,6 +5,8 @@ import pyext
 from collections import deque
 from tornado.ioloop import IOLoop
 
+TASK_MAX = 4
+
 STATUS_NONE = 0
 STATUS_AC = 1
 STATUS_WA = 2
@@ -14,9 +16,44 @@ STATUS_MLE = 5
 STATUS_CE = 6
 STATUS_ERR = 7
 
+task_runcount = 0
+task_queue = deque()
+
+def emit_task(func,*args):
+    global task_runcount
+    global task_queue
+
+    if task_runcount == TASK_MAX:
+        task_queue.appendleft((func,args))
+        return
+
+    task_runcount += 1
+    func(*args)
+
+def end_task():
+    global task_runcount
+
+    def _runqueue():
+        global task_runcount
+        global task_queue
+
+        while len(task_queue) > 0 and task_runcount < TASK_MAX:
+            task_runcount += 1
+
+            func,args = task_queue.pop()
+            func(*args)
+
+    task_runcount -= 1
+    if task_runcount == (TASK_MAX - 1):
+        IOLoop.instance().add_callback(_runqueue)
+
 def emit_test(chal_desc,ws):
+    global task_queue
+
     def _comp_cb(status):
         nonlocal testm
+
+        end_task()
 
         if status != STATUS_NONE:
             for test_idx in list(testm.keys()):
@@ -37,7 +74,7 @@ def emit_test(chal_desc,ws):
                 _run(chal_id,test_idx,data_id,res_path,timelimit,memlimit)
                 
     def _run(chal_id,test_idx,data_id,res_path,timelimit,memlimit):
-        pyext.chal_run(
+        emit_task(pyext.chal_run,
                 lambda status,runtime,memory : IOLoop.instance().add_callback(
                     _end,test_idx,status,runtime,memory),
                 'tmp/run/%d/a.out'%chal_id,
@@ -48,6 +85,8 @@ def emit_test(chal_desc,ws):
 
     def _end(test_idx,status,runtime,memory):
         nonlocal testm
+
+        end_task()
 
         test = testm[test_idx]
         test['remain'] -= 1
@@ -70,7 +109,6 @@ def emit_test(chal_desc,ws):
             'runtime':test['runtime'],
             'memory':test['memory']
         }))
-
 
     chal_id = chal_desc['chal_id']
     testl = chal_desc['testl']
@@ -101,6 +139,6 @@ def emit_test(chal_desc,ws):
         pass
     os.mkdir("tmp/run/%d"%chal_id)
 
-    pyext.chal_comp(
+    emit_task(pyext.chal_comp,
             lambda status : IOLoop.instance().add_callback(_comp_cb,status),
             comp_type,res_path,code_path,"tmp/run/%d/a.out"%chal_id)
