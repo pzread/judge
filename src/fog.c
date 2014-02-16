@@ -19,14 +19,21 @@
 #include<linux/btrfs.h>
 
 #include"snap.h"
+#include"timer.h"
 #include"fog.h"
+
+struct fog_cont{
+    int cont_id;
+};
 
 /*static int delete_contdir(const char *path,const struct stat *st,
 	int flag,struct FTW *ftwbuf);*/
 static int chown_contdir(const char *path,const struct stat *st,
 	int flag,struct FTW *ftwbuf);
+static void handle_delayfree(struct timer *timer);
 
 static int last_cont_id = 0;
+static struct timer *delayfree_timer;
 
 int fog_init(void){
     DIR *dirp;
@@ -65,6 +72,12 @@ int fog_init(void){
                 chown_contdir,16,FTW_DEPTH | FTW_PHYS | FTW_ACTIONRETVAL)){
 	return -1;
     }
+
+    if((delayfree_timer = timer_alloc()) == NULL){
+        return -1;
+    }
+    timer_set(delayfree_timer,0,0);
+    delayfree_timer->alarm_handler = handle_delayfree;
 
     return 0;
 }
@@ -143,29 +156,6 @@ int fog_cont_set(int id,unsigned long memlimit){
 
     return 0;
 }
-int fog_cont_free(int id){
-    char name[BTRFS_PATH_NAME_MAX + 1];
-    char path[PATH_MAX + 1];
-
-    snprintf(name,BTRFS_PATH_NAME_MAX + 1,"%d",id);
-    if(snap_delete("container",name)){
-        printf("  error 1\n");
-	return -1;
-    }
-
-    snprintf(path,PATH_MAX + 1,"cgroup/cpu,cpuacct/%s_%d",CONTPREFIX,id);
-    if(rmdir(path)){
-        printf("  error 2\n");
-	return -1;
-    }
-    snprintf(path,PATH_MAX + 1,"cgroup/memory/%s_%d",CONTPREFIX,id);
-    if(rmdir(path)){
-        printf("  error 3\n");
-	return -1;
-    }
-
-    return 0;
-}
 int fog_cont_reset(int id){
     char path[PATH_MAX + 1];
 
@@ -241,6 +231,34 @@ int fog_cont_attach(int id){
 
     return 0;
 }
+
+int fog_cont_free(int id){
+    char name[BTRFS_PATH_NAME_MAX + 1];
+    char path[PATH_MAX + 1];
+
+    snprintf(name,BTRFS_PATH_NAME_MAX + 1,"%d",id);
+    if(snap_delete("container",name)){
+        printf("  error 1\n");
+	return -1;
+    }
+
+    snprintf(path,PATH_MAX + 1,"cgroup/cpu,cpuacct/%s_%d",CONTPREFIX,id);
+    if(rmdir(path)){
+        printf("  error 2\n");
+	return -1;
+    }
+    snprintf(path,PATH_MAX + 1,"cgroup/memory/%s_%d",CONTPREFIX,id);
+    if(rmdir(path)){
+        printf("  error 3\n");
+	return -1;
+    }
+
+    return 0;
+}
+static void handle_delayfree(struct timer *timer){
+    
+}
+
 /*
 int fog_cont_stat(int id,struct cont_stat *stat){
     char path[PATH_MAX + 1]; 
