@@ -1,34 +1,126 @@
---- a/include/asm-generic/resource.h	2014-01-29 21:06:37.000000000 +0800
-+++ b/include/asm-generic/resource.h	2014-02-01 05:57:07.252696600 +0800
-@@ -25,6 +25,7 @@
+From 3fae0d6d4d097028bb15903c628e48d8361f4732 Mon Sep 17 00:00:00 2001
+From: root <root@V.DEBIAN>
+Date: Thu, 20 Feb 2014 00:04:35 +0800
+Subject: [PATCH 273/273] Test timer
+
+Test hang patch
+
+Merge RLIMIT_UTIME
+
+Signed-off-by: root <root@V.DEBIAN>
+---
+ include/asm-generic/resource.h      |  2 ++
+ include/linux/sched.h               |  2 ++
+ include/uapi/asm-generic/resource.h |  6 +++++-
+ kernel/exit.c                       |  3 +++
+ kernel/fork.c                       | 16 ++++++++++++++++
+ kernel/posix-cpu-timers.c           | 25 +++++++++++++++++++++++++
+ kernel/sched/core.c                 | 19 +++++++++++++++++++
+ kernel/sys.c                        | 19 +++++++++++++++++++
+ 8 files changed, 91 insertions(+), 1 deletion(-)
+
+diff --git a/include/asm-generic/resource.h b/include/asm-generic/resource.h
+index b4ea8f5..a74e865 100644
+--- a/include/asm-generic/resource.h
++++ b/include/asm-generic/resource.h
+@@ -25,6 +25,8 @@
  	[RLIMIT_NICE]		= { 0, 0 },				\
  	[RLIMIT_RTPRIO]		= { 0, 0 },				\
  	[RLIMIT_RTTIME]		= {  RLIM_INFINITY,  RLIM_INFINITY },	\
 +	[RLIMIT_UTIME]		= {  RLIM_INFINITY,  RLIM_INFINITY },	\
++	[RLIMIT_HANG]		= {  RLIM_INFINITY,  RLIM_INFINITY },	\
  }
  
  #endif
---- a/include/uapi/asm-generic/resource.h	2014-01-29 21:06:37.000000000 +0800
-+++ b/include/uapi/asm-generic/resource.h	2014-02-01 10:19:51.786545800 +0800
-@@ -45,7 +45,8 @@
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 53f97eb..c309d65 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1454,6 +1454,8 @@ struct task_struct {
+ 	unsigned int	sequential_io;
+ 	unsigned int	sequential_io_avg;
+ #endif
++
++	struct delayed_work rlimit_hang_work;
+ };
+ 
+ /* Future-safe accessor for struct task_struct's cpus_allowed. */
+diff --git a/include/uapi/asm-generic/resource.h b/include/uapi/asm-generic/resource.h
+index f863428..a543112 100644
+--- a/include/uapi/asm-generic/resource.h
++++ b/include/uapi/asm-generic/resource.h
+@@ -45,7 +45,11 @@
  					   0-39 for nice level 19 .. -20 */
  #define RLIMIT_RTPRIO		14	/* maximum realtime priority */
  #define RLIMIT_RTTIME		15	/* timeout for RT tasks in us */
 -#define RLIM_NLIMITS		16
-+#define RLIMIT_UTIME		16	/* User time in sec */
-+#define RLIM_NLIMITS		17
++
++#define RLIMIT_UTIME		16	/* user time in usec */
++#define RLIMIT_HANG		17	/* timeout for hang in usec */
++
++#define RLIM_NLIMITS		18
  
  /*
   * SuS says limits have to be unsigned.
---- a/kernel/posix-cpu-timers.c	2014-01-29 21:06:37.000000000 +0800
-+++ b/kernel/posix-cpu-timers.c	2014-02-01 10:19:27.246545800 +0800
-@@ -1046,6 +1046,31 @@ static void check_process_timers(struct
+diff --git a/kernel/exit.c b/kernel/exit.c
+index a949819..dd6bdd4 100644
+--- a/kernel/exit.c
++++ b/kernel/exit.c
+@@ -754,6 +754,9 @@ void do_exit(long code)
+ 				current->comm, task_pid_nr(current),
+ 				preempt_count());
+ 
++	/* Cancel queued RLIMIT_HANG delayed work */
++	cancel_delayed_work(&tsk->rlimit_hang_work);
++
+ 	acct_update_integrals(tsk);
+ 	/* sync mm's RSS info before statistics gathering */
+ 	if (tsk->mm)
+diff --git a/kernel/fork.c b/kernel/fork.c
+index dfa736c..4e17bb6 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1118,6 +1118,19 @@ init_task_pid(struct task_struct *task, enum pid_type type, struct pid *pid)
+ 	 task->pids[type].pid = pid;
+ }
+ 
++/* Kill process if hang time exceeds limit. */
++static void rlimit_hang_fn(struct work_struct *w)
++{
++	struct task_struct *tsk = container_of((struct delayed_work*)w,
++		struct task_struct, rlimit_hang_work);
++	unsigned long flags;
++
++	if(lock_task_sighand(tsk, &flags)) {
++		__group_send_sig_info(SIGKILL, SEND_SIG_PRIV, tsk);
++		unlock_task_sighand(tsk, &flags);
++	}
++}
++
+ /*
+  * This creates a new process as a copy of the old one,
+  * but does not actually start it yet.
+@@ -1310,6 +1323,9 @@ static struct task_struct *copy_process(unsigned long clone_flags,
+ 	p->sequential_io_avg	= 0;
+ #endif
+ 
++	/* Initialize RLIMIT_HANG delayed work. */
++	INIT_DELAYED_WORK(&p->rlimit_hang_work, rlimit_hang_fn);
++
+ 	/* Perform scheduler related setup. Assign this task to a CPU. */
+ 	sched_fork(clone_flags, p);
+ 
+diff --git a/kernel/posix-cpu-timers.c b/kernel/posix-cpu-timers.c
+index c7f31aa..5a53a7d 100644
+--- a/kernel/posix-cpu-timers.c
++++ b/kernel/posix-cpu-timers.c
+@@ -1046,6 +1046,31 @@ static void check_process_timers(struct task_struct *tsk,
  		}
  	}
  
 +	soft = ACCESS_ONCE(sig->rlim[RLIMIT_UTIME].rlim_cur);
-+	if(soft != RLIM_INFINITY){
-+		unsigned long usecs = cputime_to_secs(utime);
++	if (soft != RLIM_INFINITY) {
++		unsigned long usecs = cputime_to_usecs(utime);
 +		unsigned long hard =
 +			ACCESS_ONCE(sig->rlim[RLIMIT_UTIME].rlim_max);
 +		if (usecs >= hard) {
@@ -54,12 +146,56 @@
  	sig->cputime_expires.prof_exp = expires_to_cputime(prof_expires);
  	sig->cputime_expires.virt_exp = expires_to_cputime(virt_expires);
  	sig->cputime_expires.sched_exp = sched_expires;
---- a/kernel/sys.c	2014-01-29 21:06:37.000000000 +0800
-+++ b/kernel/sys.c	2014-02-01 09:51:27.280260400 +0800
-@@ -1382,6 +1382,15 @@ int do_prlimit(struct task_struct *tsk,
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index c677510..dba5ff9 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -760,10 +760,28 @@ static void set_load_weight(struct task_struct *p)
+ 	load->inv_weight = prio_to_wmult[prio];
+ }
+ 
++/* Update state of RLIMIT_HANG delayed work */
++static void update_rlimit_hang(struct task_struct *p)
++{
++	struct rlimit rlim = p->signal->rlim[RLIMIT_HANG];
++	
++	if (rlim.rlim_cur == RLIM_INFINITY) {
++		return;
++	}
++
++	if (p->state == TASK_INTERRUPTIBLE) {
++		schedule_delayed_work(&p->rlimit_hang_work,
++			usecs_to_jiffies(rlim.rlim_cur));
++	} else {
++		cancel_delayed_work(&p->rlimit_hang_work);
++	}
++}
++
+ static void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
+ {
+ 	update_rq_clock(rq);
+ 	sched_info_queued(rq, p);
++	update_rlimit_hang(p);
+ 	p->sched_class->enqueue_task(rq, p, flags);
+ }
+ 
+@@ -771,6 +789,7 @@ static void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
+ {
+ 	update_rq_clock(rq);
+ 	sched_info_dequeued(rq, p);
++	update_rlimit_hang(p);
+ 	p->sched_class->dequeue_task(rq, p, flags);
+ }
+ 
+diff --git a/kernel/sys.c b/kernel/sys.c
+index c723113..544fb23b 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -1382,6 +1382,16 @@ int do_prlimit(struct task_struct *tsk, unsigned int resource,
  			 */
  			new_rlim->rlim_cur = 1;
  		}
++
 +		if(resource == RLIMIT_UTIME && new_rlim->rlim_cur == 0){
 +			/*
 +			 * The caller is asking for an immediate RLIMIT_UTIME
@@ -72,20 +208,22 @@
  	}
  	if (!retval) {
  		if (old_rlim)
-@@ -1400,6 +1409,16 @@ int do_prlimit(struct task_struct *tsk,
+@@ -1400,6 +1410,15 @@ int do_prlimit(struct task_struct *tsk, unsigned int resource,
  	 if (!retval && new_rlim && resource == RLIMIT_CPU &&
  			 new_rlim->rlim_cur != RLIM_INFINITY)
  		update_rlimit_cpu(tsk, new_rlim->rlim_cur);
 +
 +	 if (!retval && new_rlim && resource == RLIMIT_UTIME &&
-+			new_rlim->rlim_cur != RLIM_INFINITY){
-+		cputime_t cputime = secs_to_cputime(new_rlim->rlim_cur);
++			new_rlim->rlim_cur != RLIM_INFINITY) {
++		cputime_t cputime = usecs_to_cputime(new_rlim->rlim_cur);
 +
 +		spin_lock_irq(&tsk->sighand->siglock);
-+		set_process_cpu_timer(tsk, CPUCLOCK_VIRT, &cputime,
-+			NULL);
++		set_process_cpu_timer(tsk, CPUCLOCK_VIRT, &cputime,NULL);
 +		spin_unlock_irq(&tsk->sighand->siglock);
 +	 }
  out:
  	read_unlock(&tasklist_lock);
  	return retval;
+-- 
+1.8.5.3
+

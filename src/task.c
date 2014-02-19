@@ -93,7 +93,7 @@ int task_init(void){
 
     if(send_msg(sockfd,fid,getpid(),TASKSTATS_CMD_GET,
 	    TASKSTATS_CMD_ATTR_REGISTER_CPUMASK,
-	    "0-1",strlen("0-1") + 1)){
+	    "0-3",strlen("0-3") + 1)){
 	goto err;
     }
     if(fcntl(sockfd,F_SETFL,O_NONBLOCK)){
