@@ -73,7 +73,7 @@ static int exec_comp(struct comp_data *cdata);
 static void handle_compsig(struct task *task,siginfo_t *siginfo);
 static int exec_run(struct run_data *rdata);
 static void handle_runsig(struct task *task,siginfo_t *siginfo);
-static void handle_runstat(struct task *task,const struct taskstats *stats);
+static void handle_runstat(struct task *task,const struct taskstats_ex *statex);
 static void handle_runend(struct run_data *rdata,int status);
 
 static int copy_file(const char *dst,const char *src){
@@ -517,9 +517,9 @@ static int exec_run(struct run_data *rdata){
     limit.rlim_cur = 5000000UL;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_HANG,&limit);
-    /*limit.rlim_cur = rdata->memlimit + 4096UL;
+    limit.rlim_cur = rdata->memlimit + 65536UL;
     limit.rlim_max = limit.rlim_cur;
-    setrlimit(RLIMIT_AS,&limit);*/
+    setrlimit(RLIMIT_AS,&limit);
 
     execve("/run/a.out",args,envp);
     return 0;
@@ -543,19 +543,24 @@ static void handle_runsig(struct task *task,siginfo_t *siginfo){
 	rdata->status = max(rdata->status,STATUS_RE);
     }
 }
-static void handle_runstat(struct task *task,const struct taskstats *stats){
+static void handle_runstat(struct task *task,const struct taskstats_ex *statex){
     struct run_data *rdata;
     int status = STATUS_NONE;
 
     rdata = (struct run_data*)task->private;
     rdata->run_pid = 0;
     task->stat_handler = NULL;
-    rdata->runtime = stats->ac_utime / 1000UL;
-    rdata->memory = stats->hiwater_vm * 1024UL;
+    rdata->runtime = statex->stats.ac_utime / 1000UL;
+    rdata->memory = statex->stats.hiwater_vm * 1024UL;
 
     if(rdata->memory > rdata->memlimit){
 	status = STATUS_MLE;
+    }else if(statex->rlim_exceed[RLIMIT_AS] > 0){
+	rdata->memory = rdata->memlimit;
+	status = STATUS_MLE;
     }else if(stats->ac_utime > rdata->timelimit * 1000UL){
+	status = STATUS_TLE;
+    }else if(statex->rlim_exceed[RLIMIT_HANG] > 0){
 	status = STATUS_TLE;
     }
 

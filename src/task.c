@@ -2,9 +2,6 @@
 
 #define NLA_DATA(x) ((char*)(x) + NLA_HDRLEN)
 #define RECVBUF_SIZE 64 * 1024 * 1024
-#define RECVTYPE_NLHDR 0
-#define RECVTYPE_NLERR 1
-#define RECVTYPE_PAYLOAD 2
 
 #include<stdio.h>
 #include<stdlib.h>
@@ -46,6 +43,7 @@ int task_init(void){
     struct nlmsghdr *nlhdr;
     struct nlattr *na;
     uint16_t fid;
+    char cpumask[64];
     
     task_ht = kh_init(ptr);
 
@@ -91,9 +89,10 @@ int task_init(void){
     na = (struct nlattr*)((char*)na + NLA_ALIGN(na->nla_len));
     fid = *(uint16_t*)((char*)NLA_DATA(na));
 
+    snprintf(cpumask,64,"0-%ld",sysconf(_SC_NPROCESSORS_CONF) - 1);
     if(send_msg(sockfd,fid,getpid(),TASKSTATS_CMD_GET,
 	    TASKSTATS_CMD_ATTR_REGISTER_CPUMASK,
-	    "0-3",strlen("0-3") + 1)){
+	    cpumask,strlen(cpumask) + 1)){
 	goto err;
     }
     if(fcntl(sockfd,F_SETFL,O_NONBLOCK)){
@@ -208,7 +207,7 @@ static void handle_taskstats(struct ev_header *evhdr,uint32_t events){
     unsigned int aggrlen;
     struct nlattr *aggrna;
 
-    struct taskstats *stats;
+    struct taskstats_ex *statex;
     struct task *task;
 
     while((ret = recv(sockfd,recvbuf,RECVBUF_SIZE,0)) > 0){
@@ -235,13 +234,13 @@ static void handle_taskstats(struct ev_header *evhdr,uint32_t events){
 			continue;
 		    }
 
-		    stats = (struct taskstats*)NLA_DATA(aggrna);
-		    if((task = task_getby_pid(stats->ac_pid)) == NULL){
+		    statex = (struct taskstats_ex*)NLA_DATA(aggrna);
+		    if((task = task_getby_pid(statex->stats.ac_pid)) == NULL){
 			continue;
 		    }
 
 		    if(task->stat_handler != NULL){
-			task->stat_handler(task,stats);
+			task->stat_handler(task,statex);
 		    }
 		    
 		    task_put(task);

@@ -5,12 +5,17 @@
 #include<sys/types.h>
 #include<linux/taskstats.h>
 
+struct taskstats_ex {
+    struct taskstats stats;
+    uint64_t rlim_exceed[RLIM_NLIMITS];
+};
+
 struct task{
     unsigned long refcount;
     pid_t pid;
 
     void (*sig_handler)(struct task *task,siginfo_t *siginfo);
-    void (*stat_handler)(struct task *task,const struct taskstats *stats);
+    void (*stat_handler)(struct task *task,const struct taskstats_ex *statex);
 
     void *private;
 };
