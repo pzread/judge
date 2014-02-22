@@ -13,6 +13,7 @@
 #define CHALL_ST_EXIT 3
 
 #define RLIMIT_UTIME 16
+#define RLIMIT_HANG 17
 
 #include<stdio.h>
 #include<stdlib.h>
@@ -510,9 +511,12 @@ static int exec_run(struct run_data *rdata){
     limit.rlim_cur = 16;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_NOFILE,&limit);
-    limit.rlim_cur = (rdata->timelimit / 1000UL) + 1UL;
+    limit.rlim_cur = (rdata->timelimit + 100UL) * 1000UL;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_UTIME,&limit);
+    limit.rlim_cur = 5000000UL;
+    limit.rlim_max = limit.rlim_cur;
+    setrlimit(RLIMIT_HANG,&limit);
     /*limit.rlim_cur = rdata->memlimit + 4096UL;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_AS,&limit);*/
