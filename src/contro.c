@@ -539,7 +539,7 @@ static void handle_runsig(struct task *task,siginfo_t *siginfo){
 	task->sig_handler = NULL;
     }
 
-    if(siginfo->si_code != CLD_EXITED){
+    if(siginfo->si_code != CLD_EXITED && siginfo->si_code != CLD_KILLED){
 	rdata->status = max(rdata->status,STATUS_RE);
     }
 }
