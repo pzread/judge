@@ -514,7 +514,7 @@ static int exec_run(struct run_data *rdata){
     limit.rlim_cur = (rdata->timelimit + 100UL) * 1000UL;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_UTIME,&limit);
-    limit.rlim_cur = 5000000UL;
+    limit.rlim_cur = 1000000UL;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_HANG,&limit);
     limit.rlim_cur = rdata->memlimit + 65536UL;
@@ -558,7 +558,7 @@ static void handle_runstat(struct task *task,const struct taskstats_ex *statex){
     }else if(statex->rlim_exceed[RLIMIT_AS] > 0){
 	rdata->memory = rdata->memlimit;
 	status = STATUS_MLE;
-    }else if(stats->ac_utime > rdata->timelimit * 1000UL){
+    }else if(statex->stats.ac_utime > rdata->timelimit * 1000UL){
 	status = STATUS_TLE;
     }else if(statex->rlim_exceed[RLIMIT_HANG] > 0){
 	status = STATUS_TLE;

@@ -5,6 +5,9 @@
 #include<sys/types.h>
 #include<linux/taskstats.h>
 
+#undef RLIM_NLIMITS
+#define RLIM_NLIMITS 18
+
 struct taskstats_ex {
     struct taskstats stats;
     uint64_t rlim_exceed[RLIM_NLIMITS];
