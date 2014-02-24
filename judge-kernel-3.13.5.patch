@@ -1,25 +1,12 @@
-From ac30e2e02e944e01bf8426379c8a7fd7942dd88b Mon Sep 17 00:00:00 2001
+From 6181d225dad3b2519e157345f470f333a8fab3fe Mon Sep 17 00:00:00 2001
 From: root <root@V.DEBIAN>
-Date: Thu, 20 Feb 2014 00:04:35 +0800
-Subject: [PATCH 273/273] Test timer
+Date: Tue, 25 Feb 2014 02:48:39 +0800
+Subject: [PATCH] Generate patch
 
-Test hang patch
-
-Merge RLIMIT_UTIME
-
-Add rlimit exceed counter
-
-Fix format
-
-Fix member name
-
-Test taskstats
-
-Support RLIMIT_NPROC, RLIMIT_NOFILE
 ---
  drivers/staging/android/binder.c    |  2 +-
  fs/exec.c                           |  3 +++
- fs/file.c                           |  5 ++++-
+ fs/file.c                           |  8 ++++++--
  include/asm-generic/resource.h      |  2 ++
  include/linux/fdtable.h             |  7 ++++++-
  include/linux/sched.h               |  6 ++++++
@@ -32,7 +19,7 @@ Support RLIMIT_NPROC, RLIMIT_NOFILE
  kernel/sys.c                        | 19 +++++++++++++++++++
  kernel/tsacct.c                     |  6 ++++++
  mm/mmap.c                           | 14 +++++++++++++-
- 15 files changed, 159 insertions(+), 6 deletions(-)
+ 15 files changed, 161 insertions(+), 7 deletions(-)
 
 diff --git a/drivers/staging/android/binder.c b/drivers/staging/android/binder.c
 index eaec1da..96a312f 100644
@@ -62,7 +49,7 @@ index 7ea097f..7444aa33 100644
  		goto out_ret;
  	}
 diff --git a/fs/file.c b/fs/file.c
-index 4a78f98..3197509 100644
+index 9de2026..799265f 100644
 --- a/fs/file.c
 +++ b/fs/file.c
 @@ -458,7 +458,7 @@ struct files_struct init_files = {
@@ -74,16 +61,20 @@ index 4a78f98..3197509 100644
  	       unsigned start, unsigned end, unsigned flags)
  {
  	unsigned int fd;
-@@ -481,6 +481,9 @@ repeat:
+@@ -480,8 +480,12 @@ repeat:
+ 	 * will limit the total number of files that can be opened.
  	 */
  	error = -EMFILE;
- 	if (fd >= end)
+-	if (fd >= end)
++	if (fd >= end) {
 +		/* Count RLIMIT_NOFILE exceed */
 +		atomic64_inc(&tsk->rlim_exceed[RLIMIT_NOFILE]);
 +
  		goto out;
++	}
  
  	error = expand_files(files, fd);
+ 	if (error < 0)
 diff --git a/include/asm-generic/resource.h b/include/asm-generic/resource.h
 index b4ea8f5..a74e865 100644
 --- a/include/asm-generic/resource.h
