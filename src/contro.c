@@ -13,6 +13,7 @@
 #define CHALL_ST_EXIT 3
 
 #define RLIMIT_UTIME 16
+#define RLIMIT_HANG 17
 
 #include<stdio.h>
 #include<stdlib.h>
@@ -72,7 +73,7 @@ static int exec_comp(struct comp_data *cdata);
 static void handle_compsig(struct task *task,siginfo_t *siginfo);
 static int exec_run(struct run_data *rdata);
 static void handle_runsig(struct task *task,siginfo_t *siginfo);
-static void handle_runstat(struct task *task,const struct taskstats *stats);
+static void handle_runstat(struct task *task,const struct taskstats_ex *statex);
 static void handle_runend(struct run_data *rdata,int status);
 
 static int copy_file(const char *dst,const char *src){
@@ -289,11 +290,11 @@ static int exec_comp(struct comp_data *cdata){
         "/code/main.cpp","-o","/out/a.out","-q",NULL};
     char *clangxx_envp[] = {"PATH=/usr/bin",NULL};
 
-    char *make_args[] = {"make","-s",NULL};
+    char *make_args[] = {"make",NULL};
     char *make_envp[] = {"PATH=/usr/bin","OUT=/out/a.out",NULL};
 
     char *gxx_args[] = {"g++","-O2","-std=c++1y",
-        "/code/main.cpp","-o","/out/a.out","-q",NULL};
+        "/code/main.cpp","-o","/out/a.out",NULL};
     char *gxx_envp[] = {"PATH=/usr/bin",NULL};
 
     sem_wait(cdata->lock);
@@ -463,6 +464,11 @@ err:
     return -1;
 }
 static int exec_run(struct run_data *rdata){
+    DIR *dirp;
+    int expfd;
+    struct dirent *entry;
+    long int fd;
+
     struct rlimit limit;
     char *args[] = {"a.out",NULL};
     char *envp[] = {NULL};
@@ -472,7 +478,32 @@ static int exec_run(struct run_data *rdata){
     if(IO_EXEC(rdata->iohdr)){
 	exit(1); 
     }
-    
+
+    if((dirp = opendir("/proc/self/fd")) == NULL){
+	exit(1); 
+    }
+    expfd = dirfd(dirp);
+
+    while((entry = readdir(dirp)) != NULL){
+        if(!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")){
+            continue;
+        }
+        
+        fd = strtol(entry->d_name,NULL,10);
+        if(fd == LONG_MAX || fd == LONG_MIN){
+            closedir(dirp);
+            exit(1);
+        }
+
+        if(fd > 2 && fd != (long int)expfd){
+            if(close((int)fd)){
+                closedir(dirp);
+                exit(1);
+            }
+        }
+    }
+    closedir(dirp);
+
     if(fog_cont_attach(rdata->cont_id)){
         exit(1);
     }
@@ -480,12 +511,15 @@ static int exec_run(struct run_data *rdata){
     limit.rlim_cur = 16;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_NOFILE,&limit);
-    limit.rlim_cur = (rdata->timelimit / 1000UL) + 1UL;
+    limit.rlim_cur = (rdata->timelimit + 100UL) * 1000UL;
     limit.rlim_max = limit.rlim_cur;
     setrlimit(RLIMIT_UTIME,&limit);
-    /*limit.rlim_cur = rdata->memlimit + 4096UL;
+    limit.rlim_cur = 1000000UL;
     limit.rlim_max = limit.rlim_cur;
-    setrlimit(RLIMIT_AS,&limit);*/
+    setrlimit(RLIMIT_HANG,&limit);
+    limit.rlim_cur = rdata->memlimit + 65536UL;
+    limit.rlim_max = limit.rlim_cur;
+    setrlimit(RLIMIT_AS,&limit);
 
     execve("/run/a.out",args,envp);
     return 0;
@@ -509,19 +543,24 @@ static void handle_runsig(struct task *task,siginfo_t *siginfo){
 	rdata->status = max(rdata->status,STATUS_RE);
     }
 }
-static void handle_runstat(struct task *task,const struct taskstats *stats){
+static void handle_runstat(struct task *task,const struct taskstats_ex *statex){
     struct run_data *rdata;
     int status = STATUS_NONE;
 
     rdata = (struct run_data*)task->private;
     rdata->run_pid = 0;
     task->stat_handler = NULL;
-    rdata->runtime = stats->ac_utime / 1000UL;
-    rdata->memory = stats->hiwater_vm * 1024UL;
+    rdata->runtime = statex->stats.ac_utime / 1000UL;
+    rdata->memory = statex->stats.hiwater_vm * 1024UL;
 
     if(rdata->memory > rdata->memlimit){
 	status = STATUS_MLE;
-    }else if(stats->ac_utime > rdata->timelimit * 1000UL){
+    }else if(statex->rlim_exceed[RLIMIT_AS] > 0){
+	rdata->memory = rdata->memlimit;
+	status = STATUS_MLE;
+    }else if(statex->stats.ac_utime > rdata->timelimit * 1000UL){
+	status = STATUS_TLE;
+    }else if(statex->rlim_exceed[RLIMIT_HANG] > 0){
 	status = STATUS_TLE;
     }
 
@@ -540,7 +579,9 @@ static void handle_runend(struct run_data *rdata,int status){
 		rdata->status,rdata->runtime,rdata->memory);
 
 	IO_FREE(rdata->iohdr);
-	fog_cont_free(rdata->cont_id);
+	if(fog_cont_free(rdata->cont_id)){
+            printf("fog cont free failed\n");
+        }
 	sem_destroy(rdata->lock);
 	munmap(rdata->lock,sizeof(*rdata->lock));
 	free(rdata);

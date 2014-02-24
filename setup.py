@@ -11,6 +11,7 @@ pyext_module = Extension('pyext',
             'src/fog.c',
             'src/snap.c',
             'src/task.c',
+            'src/timer.c',
             'src/ev.c',
             'src/io.c'
         ],

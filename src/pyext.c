@@ -328,6 +328,8 @@ static PyObject* pyext_chal_comp(PyObject *self,PyObject *args){
             comp_type,respath,codepath,outpath)){
 
         PyErr_SetString(PyExc_SystemError,"challenge compile failed");
+        printf(" failed 1\n");
+        return NULL;
     }
 
     Py_INCREF(Py_None);
@@ -352,6 +354,8 @@ static PyObject* pyext_chal_run(PyObject *self,PyObject *args){
 	    runpath,timelimit,memlimit,inpath,anspath)){
 
         PyErr_SetString(PyExc_SystemError,"challenge run failed");
+        printf(" failed 2\n");
+        return NULL;
     }
 
     Py_INCREF(Py_None);

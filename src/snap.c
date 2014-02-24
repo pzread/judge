@@ -52,6 +52,7 @@ int snap_delete(const char *dst,const char *name){
     struct btrfs_ioctl_vol_args arg;
     
     if((dstfd = open(dst,O_RDONLY | O_DIRECTORY | O_CLOEXEC)) < 0){
+        printf(" snap delete failed 1\n");
 	ret = -1;
 	goto end;
     }
@@ -60,6 +61,7 @@ int snap_delete(const char *dst,const char *name){
     strncpy(arg.name,name,BTRFS_PATH_NAME_MAX);
     arg.name[BTRFS_PATH_NAME_MAX] = '\0';
     if(ioctl(dstfd,BTRFS_IOC_SNAP_DESTROY,&arg)){
+        printf(" snap delete failed 2 %d\n",errno);
 	ret = -1;
 	goto end;
     }
