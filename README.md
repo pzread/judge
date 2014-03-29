@@ -7,4 +7,4 @@ Requirement
 -----------
 
 1. net.core.rmem_max >= 67108864
-2. Btrfs filesystem
+2. B-tree file system
