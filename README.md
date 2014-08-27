@@ -1,10 +1,5 @@
-judge12 HypeX
-=============
+Silent Night
+============
 
-judge server on Linux 64-bit
-
-Requirement
------------
-
-1. net.core.rmem_max >= 67108864
-2. B-tree file system
+https://gist.github.com/pzread/caaf85d78b960d43f5bd
+https://trello.com/b/prhA5fl5/judge
