@@ -10,36 +10,31 @@ import (
     "github.com/martini-contrib/render"
 )
 
-func RestAddPkg(ren render.Render,req *http.Request) {
-    ret := make(map[string]interface{})
+func RestAddPkg(ren render.Render,req *http.Request,env APIEnv) {
+    ret := map[string]interface{}{"error":""}
+    defer ren.JSON(200,ret)
 
     pkgl := req.ContentLength
     if pkgl <= 0 {
 	ret["error"] = "EINVAL"
-	ren.JSON(200,ret)
 	return
     }
     if pkgl > PKG_MAXSIZE {
 	ret["error"] = "E2BIG"
-	ren.JSON(200,ret)
 	return
     }
 
     tmpf,err := ioutil.TempFile("","")
     if err != nil {
 	ret["error"] = "EIO"
-	ren.JSON(200,ret)
 	return
     }
+    defer tmpf.Close()
+    defer os.Remove(tmpf.Name())
+
     writel,err := io.CopyN(tmpf,req.Body,pkgl)
     if writel != pkgl || err != nil {
-	os.Remove(tmpf.Name())
 	ret["error"] = "EIO"
-	ren.JSON(200,ret)
 	return
     }
-
-    //os.Remove(tmpf.Name())
-    ret["error"] = ""
-    ren.JSON(200,ret)
 }

@@ -5,6 +5,7 @@
 
 *.py[cod]
 __pycache__/
+*.css
 
 snapshot/
 container/
