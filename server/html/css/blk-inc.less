@@ -1,0 +1,25 @@
+@white:#FFFFFF;
+@paper:#FCFAF2;
+@blue:#58B2DC;
+@green:#5DAC81;
+@orange:#ED784A;
+@red:#E83015;
+@purple:#70649A;
+@brown:#3A3226;
+@gray:#BDC0BA;
+@darkgray:#787878;
+@black:#0B1013;
+
+@fs-sm:14px;
+@fs-md:16px;
+@fs-lg:18px;
+
+.nav-itm (@color){
+    border-bottom-color:saturate(@color,10%);
+    transition:background-color 300ms;
+
+    &:hover,&:active,&.active{
+	color:@white;
+	background-color:@color;
+    }
+}

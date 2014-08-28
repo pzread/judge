@@ -1,0 +1,60 @@
+<!DOCTYPE>
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+<title>Judge Dash</title>
+<link rel="stylesheet" href="http://necolas.github.com/normalize.css/3.0.1/normalize.css">
+<link rel="stylesheet" href="/judge/css/blk.css">
+<script type="text/javascript" src="https://code.jquery.com/jquery-2.1.1.min.js"></script>
+<script type="text/javascript">
+'use strict'
+
+$(document).ready(function(){
+    var api_key = '078860d362d7ea6c69c13bbc7a721ab44cf3f77668b0a2399c94186dfdf5fbdd';
+
+    $('#upload').on('click',function(e){
+	var data = new FormData(); 
+	var req = new XMLHttpRequest();
+	var pkg = $('#pkg')[0].files[0];
+	var j_bar = $('#prog > .bar');
+
+	$.ajax({
+	    'url':'/judge/api/' + api_key + '/add_pkg',
+	    'type':'POST',
+	    'data':pkg,
+	    'cache':false,
+	    'processData':false,
+	    'contentType':false,
+	    'xhr':function(){
+		var xhr = new XMLHttpRequest();
+		xhr.upload.addEventListener('progress',function(e){
+		    var prog = Math.min(100,e.loaded / pkg.size * 100);
+		    j_bar.css('width',prog + '%');
+		});
+		return xhr;
+	    },
+	    'success':function(res){
+		console.log(res);
+	    },
+	});
+    });
+});
+</script>
+</head>
+<body>
+<div class="container nav">
+    <a>Judge</a>
+    <ul>
+	<li><a>Test</a></li>
+    </ul>
+</div>
+
+<div class="container" style="margin-top:32px;">
+    <div class="g-r"><div class="g-md-3 blk-cont">
+	<input id="pkg" type="file" name="pkg">
+	<div id="prog" class="blk-prog"><div class="bar"></div></div>
+	<button id="upload" class="btn-def">Upload</button>
+    </div></div>
+</div>
+</body>
+</html>
