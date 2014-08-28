@@ -7,6 +7,7 @@
 __pycache__/
 *.css
 
+server/storage/
 snapshot/
 container/
 testdata/
