@@ -5,6 +5,7 @@ import (
     "log"
     "time"
     "regexp"
+    "syscall"
     "net/http"
     "github.com/go-martini/martini"
     "github.com/martini-contrib/render"
@@ -35,15 +36,18 @@ func Filter(rspool *redis.Pool) martini.Handler {
 	    })
 	}
 
-	ctx.Map(APIEnv{
+	ctx.Map(&APIEnv{
 	    apikey,
 	    rspool.Get(),
 	    nil,
 	})
     }
 }
+func DropPriv() {
+    syscall.Umask(0077)
+}
 func main() {
-    fmt.Println("Night Server")
+    DropPriv()
 
     rspool := &redis.Pool{
 	MaxIdle:4,
@@ -56,5 +60,7 @@ func main() {
     mar := martini.Classic()
     mar.Use(render.Renderer())
     mar.Post("/api/(?P<apikey>[a-z0-9]+)/add_pkg",Filter(rspool),RestAddPkg)
+
+    fmt.Println("Night Server")
     mar.RunOnAddr("127.0.0.1:3000")
 }
