@@ -65,14 +65,11 @@ func (pkg *Package) Import(pkgfpath string) error {
 	return err
     }
 
-    pkghash := "PACKAGE@" + pkg.pkgid
     expire := int64(meta["expire"].(float64))
-    _,err = pkg.env.crs.Do("HSET",pkghash,"meta",metabuf)
-    if err != nil {
-	os.RemoveAll(pkgdpath)
-	return err
-    }
-    pkg.env.crs.Do("EXPIRE",pkghash,expire)
+    pkg.env.prs.Do("HSET","PACKAGE@" + pkg.pkgid,"meta",metabuf)
+    pkg.env.crs.Do("SADD","PKG_NODE@" + pkg.pkgid,BIND)
+    pkg.env.prs.Do("EXPIRE","PACKAGE@" + pkg.pkgid,expire)
+    pkg.env.crs.Do("EXPIRE","PKG_NODE@" + pkg.pkgid,expire)
 
     return nil
 }
