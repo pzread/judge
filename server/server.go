@@ -74,6 +74,11 @@ func main() {
 	Filter(crs_pool,prs_pool),
 	RestAddPkg,
     )
+    mar.Get(
+	"/api/(?P<apikey>[a-z0-9]+)/get_pkg/(?P<pkgid>[a-z0-9]+)",
+	Filter(crs_pool,prs_pool),
+	RestGetPkg,
+    )
 
     fmt.Println("Night Server")
     mar.RunOnAddr(BIND)

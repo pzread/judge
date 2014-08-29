@@ -4,8 +4,9 @@ import (
     "os"
     "io"
     "net/http"
-    //"github.com/go-martini/martini"
+    "github.com/go-martini/martini"
     "github.com/martini-contrib/render"
+//  "github.com/garyburd/redigo/redis"
 )
 
 func RestAddPkg(ren render.Render,req *http.Request,env *APIEnv) {
@@ -47,7 +48,25 @@ func RestAddPkg(ren render.Render,req *http.Request,env *APIEnv) {
 
     ret["pkgid"] = pkg.pkgid
 }
-func RestGetPkg(ren render.Render,req *http.Request,env *APIEnv) {
+func RestGetPkg(
+    ren render.Render,
+    req *http.Request,
+    env *APIEnv,
+    ram martini.Params,
+) {
+    pkgid := ram["pkgid"]
     ret := map[string]interface{}{"error":""}
     defer ren.JSON(200,ret)
+
+    pkg,err := PackageOpen(pkgid,env)
+    if err != nil {
+	ret["error"] = "EINVAL"
+    }
+
+    ret["meta"] = map[string]interface{}{
+	"pkgid":pkg.pkgid,
+	"apiid":pkg.apiid,
+	"when":pkg.when,
+	"expire":pkg.expire,
+    }
 }

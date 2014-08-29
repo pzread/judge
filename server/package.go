@@ -5,15 +5,19 @@ import (
     "os/exec"
     "fmt"
     "time"
+    "errors"
     "crypto/sha256"
     "encoding/json"
     "code.google.com/p/go-uuid/uuid"
-//  "github.com/garyburd/redigo/redis"
+    "github.com/garyburd/redigo/redis"
 )
 
 type Package struct {
     env *APIEnv
     pkgid string
+    apiid string
+    when int64
+    expire int64
 }
 
 func PackageCreate(env *APIEnv) Package {
@@ -21,7 +25,35 @@ func PackageCreate(env *APIEnv) Package {
     return Package{
 	env:env,
 	pkgid:pkgid,
+	apiid:"",
+	when:0,
+	expire:0,
     }
+}
+func PackageOpen(pkgid string,env *APIEnv) (Package,error) {
+    var err error
+    var meta map[string]interface{}
+
+    metabuf,err := redis.Bytes(env.prs.Do("HGET","PACKAGE@" + pkgid,"meta"))
+    if err != nil {
+	return Package{},err
+    }
+    if err := json.Unmarshal(metabuf,&meta); err != nil {
+	return Package{},err
+    }
+
+    apiid := meta["apiid"].(string)
+    if apiid != env.apiid {
+	return Package{},errors.New("EPERM")
+    }
+
+    return Package{
+	env:env,
+	pkgid:meta["pkgid"].(string),
+	apiid:apiid,
+	when:int64(meta["when"].(float64)),
+	expire:int64(meta["expire"].(float64)),
+    },nil
 }
 func (pkg *Package) Import(pkgfpath string) error {
     var err error
@@ -70,10 +102,14 @@ func (pkg *Package) Import(pkgfpath string) error {
     }
 
     expire := int64(meta["expire"].(float64))
-    pkg.env.prs.Do("HSET","PACKAGE@" + pkg.pkgid,"meta",metabuf)
-    pkg.env.crs.Do("SADD","PKG_NODE@" + pkg.pkgid,BIND)
-    pkg.env.prs.Do("EXPIRE","PACKAGE@" + pkg.pkgid,expire)
-    pkg.env.crs.Do("EXPIRE","PKG_NODE@" + pkg.pkgid,expire)
+    pkg.env.prs.Send("HSET","PACKAGE@" + pkg.pkgid,"meta",metabuf)
+    pkg.env.crs.Send("SADD","PKG_NODE@" + pkg.pkgid,BIND)
+    pkg.env.prs.Send("EXPIRE","PACKAGE@" + pkg.pkgid,expire)
+    pkg.env.crs.Send("EXPIRE","PKG_NODE@" + pkg.pkgid,expire)
+    pkg.env.prs.Flush()
+    pkg.env.crs.Flush()
+    pkg.env.prs.Receive()
+    pkg.env.crs.Receive()
 
     return nil
 }
