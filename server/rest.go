@@ -47,3 +47,7 @@ func RestAddPkg(ren render.Render,req *http.Request,env *APIEnv) {
 
     ret["pkgid"] = pkg.pkgid
 }
+func RestGetPkg(ren render.Render,req *http.Request,env *APIEnv) {
+    ret := map[string]interface{}{"error":""}
+    defer ren.JSON(200,ret)
+}

@@ -11,6 +11,7 @@ import (
 )
 
 type APIEnv struct {
+    apiid string
     apikey string
     crs redis.Conn
     prs redis.Conn
@@ -20,6 +21,7 @@ func Filter(crs_pool *redis.Pool,prs_pool *redis.Pool) martini.Handler {
     return func(
 	ctx martini.Context,
 	pam martini.Params,
+	ren render.Render,
 	log *log.Logger,
     ) {
 	apikey := pam["apikey"]
@@ -29,7 +31,15 @@ func Filter(crs_pool *redis.Pool,prs_pool *redis.Pool) martini.Handler {
 	crs.Do("SELECT",1)
 	prs := prs_pool.Get()
 	prs.Do("SELECT",2)
+
+	apiid,err := redis.String(crs.Do("GET","APIKEY@" + apikey))
+	if err != nil {
+	    ren.JSON(200,map[string]interface{}{"error":"EINVAL"})
+	    return
+	}
+
 	ctx.Map(&APIEnv{
+	    apiid,
 	    apikey,
 	    crs,
 	    prs,

@@ -3,7 +3,9 @@ package main
 import (
     "os"
     "os/exec"
+    "fmt"
     "time"
+    "crypto/sha256"
     "encoding/json"
     "code.google.com/p/go-uuid/uuid"
 //  "github.com/garyburd/redigo/redis"
@@ -15,9 +17,10 @@ type Package struct {
 }
 
 func PackageCreate(env *APIEnv) Package {
+    pkgid := fmt.Sprintf("%x",sha256.Sum256([]byte(uuid.NewUUID().String())))
     return Package{
 	env:env,
-	pkgid:uuid.NewUUID().String(),
+	pkgid:pkgid,
     }
 }
 func (pkg *Package) Import(pkgfpath string) error {
@@ -46,6 +49,7 @@ func (pkg *Package) Import(pkgfpath string) error {
 	return err
     }
     meta["pkgid"] = pkg.pkgid
+    meta["apiid"] = pkg.env.apiid
     meta["when"] = time.Now().Unix()
 
     metabuf,err = json.Marshal(meta)
@@ -73,7 +77,6 @@ func (pkg *Package) Import(pkgfpath string) error {
 
     return nil
 }
-
 func decompress(pkgid string,fpath string) (string,error) {
     dpath := STORAGE_PATH + "/package/" + pkgid
     if err := os.Mkdir(dpath,0700); err != nil {
