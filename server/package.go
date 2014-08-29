@@ -6,7 +6,7 @@ import (
     "time"
     "encoding/json"
     "code.google.com/p/go-uuid/uuid"
-    "github.com/garyburd/redigo/redis"
+//  "github.com/garyburd/redigo/redis"
 )
 
 type Package struct {
@@ -65,7 +65,7 @@ func (pkg *Package) Import(pkgfpath string) error {
 	return err
     }
 
-    pkghash := "PACKAGE@" + pkgid
+    pkghash := "PACKAGE@" + pkg.pkgid
     expire := int64(meta["expire"].(float64))
     _,err = pkg.env.crs.Do("HSET",pkghash,"meta",metabuf)
     if err != nil {

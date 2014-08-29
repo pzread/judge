@@ -36,10 +36,14 @@ func Filter(rspool *redis.Pool) martini.Handler {
 	    })
 	}
 
+	crs := rspool.Get()
+	crs.Do("SELECT","1")
+	prs := rspool.Get()
+	crs.Do("SELECT","2")
 	ctx.Map(&APIEnv{
 	    apikey,
-	    rspool.Get(),
-	    nil,
+	    crs,
+	    prs,
 	})
     }
 }
