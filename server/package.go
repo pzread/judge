@@ -6,7 +6,7 @@ import (
     "time"
     "encoding/json"
     "code.google.com/p/go-uuid/uuid"
-    //"github.com/garyburd/redigo/redis"
+    "github.com/garyburd/redigo/redis"
 )
 
 type Package struct {
@@ -45,7 +45,6 @@ func (pkg *Package) Import(pkgfpath string) error {
 	os.RemoveAll(pkgdpath)
 	return err
     }
-    //expire := int64(meta["expire"].(float64))
     meta["pkgid"] = pkg.pkgid
     meta["when"] = time.Now().Unix()
 
@@ -65,6 +64,15 @@ func (pkg *Package) Import(pkgfpath string) error {
 	os.RemoveAll(pkgdpath)
 	return err
     }
+
+    pkghash := "PACKAGE@" + pkgid
+    expire := int64(meta["expire"].(float64))
+    _,err = pkg.env.crs.Do("HSET",pkghash,"meta",metabuf)
+    if err != nil {
+	os.RemoveAll(pkgdpath)
+	return err
+    }
+    pkg.env.crs.Do("EXPIRE",pkghash,expire)
 
     return nil
 }
