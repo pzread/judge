@@ -50,13 +50,8 @@ func (pkg *Package) Get() error {
 	return err
     }
 
-    apiid := meta["apiid"].(string)
-    if apiid != pkg.env.apiid {
-	return ErrPackageAccess{pkg.pkgid}
-    }
-
     pkg.pkgid = meta["pkgid"].(string)
-    pkg.apiid = apiid
+    pkg.apiid = meta["apiid"].(string)
     pkg.when = int64(meta["when"].(float64))
     pkg.expire = int64(meta["expire"].(float64))
     return nil

@@ -60,7 +60,7 @@ func RestGetPkg(
 ) {
     pkg := PackageCreate(ram["pkgid"],env)
     err := pkg.Get()
-    if err == nil {
+    if err == nil && pkg.apiid == env.apiid {
 	res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
 	res.WriteHeader(307)
 	return
