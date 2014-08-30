@@ -1,0 +1,27 @@
+upstream backend{
+	server 10.8.0.6:3000;
+}
+
+server {
+	listen 80 default_server;
+	listen [::]:80 default_server ipv6only=on;
+
+	root /usr/share/nginx/html;
+	index index.html index.htm;
+
+	server_name localhost;
+
+	location / {
+		try_files $uri $uri/ =404;
+	}
+	location /judge/api/ {
+                rewrite /judge/api/(.*) /api/$1 break;
+                proxy_pass http://backend;
+                client_max_body_size 2g;
+        }
+	location /internal {
+		internal;
+		alias /home/user/go/bin/storage/;
+		try_files $uri =500;
+	}
+}

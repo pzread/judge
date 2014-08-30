@@ -49,24 +49,15 @@ func RestAddPkg(ren render.Render,req *http.Request,env *APIEnv) {
     ret["pkgid"] = pkg.pkgid
 }
 func RestGetPkg(
-    ren render.Render,
+    res http.ResponseWriter,
     req *http.Request,
-    env *APIEnv,
     ram martini.Params,
+    env *APIEnv,
 ) {
-    pkgid := ram["pkgid"]
-    ret := map[string]interface{}{"error":""}
-    defer ren.JSON(200,ret)
-
-    pkg,err := PackageOpen(pkgid,env)
+    pkg,err := PackageOpen(ram["pkgid"],env)
     if err != nil {
-	ret["error"] = "EINVAL"
+	res.WriteHeader(404)
     }
-
-    ret["meta"] = map[string]interface{}{
-	"pkgid":pkg.pkgid,
-	"apiid":pkg.apiid,
-	"when":pkg.when,
-	"expire":pkg.expire,
-    }
+    res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
+    res.WriteHeader(307)
 }

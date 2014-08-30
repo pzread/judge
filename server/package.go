@@ -113,6 +113,9 @@ func (pkg *Package) Import(pkgfpath string) error {
 
     return nil
 }
+func (pkg *Package) Export() string {
+    return "/package/" + pkg.pkgid + ".tar.xz"
+}
 func decompress(pkgid string,fpath string) (string,error) {
     dpath := STORAGE_PATH + "/package/" + pkgid
     if err := os.Mkdir(dpath,0700); err != nil {

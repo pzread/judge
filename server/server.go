@@ -47,7 +47,7 @@ func Filter(crs_pool *redis.Pool,prs_pool *redis.Pool) martini.Handler {
     }
 }
 func DropPriv() {
-    syscall.Umask(0077)
+    syscall.Umask(0022)
 }
 func main() {
     DropPriv()
