@@ -69,6 +69,7 @@ func main() {
 
     mar := martini.Classic()
     mar.Use(render.Renderer())
+//  External API
     mar.Post(
 	"/api/(?P<apikey>[a-z0-9]+)/add_pkg",
 	Filter(crs_pool,prs_pool),
@@ -78,6 +79,12 @@ func main() {
 	"/api/(?P<apikey>[a-z0-9]+)/get_pkg/(?P<pkgid>[a-z0-9]+)",
 	Filter(crs_pool,prs_pool),
 	RestGetPkg,
+    )
+//  Internal API
+    mar.Get(
+	"/capi/(?P<apikey>[a-z0-9]+)/trans_pkg/(?P<pkgid>[a-z0-9]+)",
+	Filter(crs_pool,prs_pool),
+	RestTransPkg,
     )
 
     fmt.Println("Night Server")

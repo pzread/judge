@@ -9,6 +9,10 @@ import (
 //  "github.com/garyburd/redigo/redis"
 )
 
+////////////////
+//External API//
+////////////////
+
 func RestAddPkg(ren render.Render,req *http.Request,env *APIEnv) {
     ret := map[string]interface{}{"error":""}
     defer ren.JSON(200,ret)
@@ -23,9 +27,8 @@ func RestAddPkg(ren render.Render,req *http.Request,env *APIEnv) {
 	return
     }
 
-    pkg := PackageCreate(env)
-
-    pkgfpath := STORAGE_PATH + "/package/" + pkg.pkgid + ".tar.xz"
+    pkgid := PackageGenID()
+    pkgfpath := STORAGE_PATH + "/package/" + pkgid + ".tar.xz"
     pkgfile,err := os.Create(pkgfpath)
     if err != nil {
 	ret["error"] = "EIO"
@@ -40,6 +43,7 @@ func RestAddPkg(ren render.Render,req *http.Request,env *APIEnv) {
 	return
     }
 
+    pkg := PackageCreate(pkgid,env)
     if pkg.Import(pkgfpath) != nil {
 	os.Remove(pkgfpath)
 	ret["error"] = "EINVAL"
@@ -54,10 +58,42 @@ func RestGetPkg(
     ram martini.Params,
     env *APIEnv,
 ) {
-    pkg,err := PackageOpen(ram["pkgid"],env)
-    if err != nil {
+    pkg := PackageCreate(ram["pkgid"],env)
+    err := pkg.Get()
+    if err == nil {
+	res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
+	res.WriteHeader(307)
+	return
+    } else if _,ok := err.(ErrPackageMiss); ok {
+	if pkg.Transport() == nil {
+	    res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
+	    res.WriteHeader(307)
+	    return
+	}
+    }
+
+    res.WriteHeader(404)
+}
+
+////////////////
+//Internal API//
+////////////////
+
+func RestTransPkg(
+    res http.ResponseWriter,
+    req *http.Request,
+    ram martini.Params,
+    env *APIEnv,
+) {
+    pkg := PackageCreate(ram["pkgid"],env)
+    err := pkg.Get()
+    if err == nil {
+	res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
+	res.WriteHeader(307)
+    } else if _,ok := err.(ErrPackageMiss); ok {
+	PackageClean(pkg.pkgid,env)
+	res.WriteHeader(404)
+    } else {
 	res.WriteHeader(404)
     }
-    res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
-    res.WriteHeader(307)
 }
