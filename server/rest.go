@@ -65,7 +65,8 @@ func RestGetPkg(
 	res.WriteHeader(307)
 	return
     } else if _,ok := err.(ErrPackageMiss); ok {
-	if pkg.Transport() == nil {
+	err = pkg.Transport()
+	if err == nil {
 	    res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
 	    res.WriteHeader(307)
 	    return

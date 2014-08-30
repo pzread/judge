@@ -197,6 +197,7 @@ func decompress(pkgid string,fpath string) (string,error) {
     }
     cmd := exec.Command(TAR_PATH,"-Jxf",fpath,"-C",dpath)
     if err := cmd.Run(); err != nil {
+	os.RemoveAll(dpath)
 	return "",err
     }
 
