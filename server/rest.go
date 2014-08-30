@@ -89,8 +89,7 @@ func RestTransPkg(
     pkg := PackageCreate(ram["pkgid"],env)
     err := pkg.Get()
     if err == nil {
-	res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
-	res.WriteHeader(307)
+	http.ServeFile(res,req,STORAGE_PATH + pkg.Export())
     } else if _,ok := err.(ErrPackageMiss); ok {
 	PackageClean(pkg.pkgid,env)
 	res.WriteHeader(404)
