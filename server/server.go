@@ -11,13 +11,13 @@ import (
 )
 
 type APIEnv struct {
-    apiid string
-    apikey string
-    crs redis.Conn
-    prs redis.Conn
+    ApiId string
+    ApiKey string
+    CRs redis.Conn
+    LRs redis.Conn
 }
 
-func Filter(crs_pool *redis.Pool,prs_pool *redis.Pool) martini.Handler {
+func Filter(crs_pool *redis.Pool,lrs_pool *redis.Pool) martini.Handler {
     return func(
 	ctx martini.Context,
 	pam martini.Params,
@@ -29,8 +29,8 @@ func Filter(crs_pool *redis.Pool,prs_pool *redis.Pool) martini.Handler {
 
 	crs := crs_pool.Get()
 	crs.Do("SELECT",1)
-	prs := prs_pool.Get()
-	prs.Do("SELECT",2)
+	lrs := lrs_pool.Get()
+	lrs.Do("SELECT",2)
 
 	apiid,err := redis.String(crs.Do("GET","APIKEY@" + apikey))
 	if err != nil {
@@ -42,7 +42,7 @@ func Filter(crs_pool *redis.Pool,prs_pool *redis.Pool) martini.Handler {
 	    apiid,
 	    apikey,
 	    crs,
-	    prs,
+	    lrs,
 	})
     }
 }
@@ -50,6 +50,7 @@ func DropPriv() {
     syscall.Umask(0022)
 }
 func main() {
+    martini.Env = "production"
     DropPriv()
 
     crs_pool := &redis.Pool{
@@ -59,7 +60,7 @@ func main() {
 	    return redis.Dial("tcp","10.8.0.10:6379")
 	},
     }
-    prs_pool := &redis.Pool{
+    lrs_pool := &redis.Pool{
 	MaxIdle:4,
 	IdleTimeout:600 * time.Second,
 	Dial:func() (redis.Conn,error) {
@@ -67,23 +68,32 @@ func main() {
 	},
     }
 
+    crs := crs_pool.Get()
+    crs.Do("SELECT",1)
+    go StateBeat(crs)
+
     mar := martini.Classic()
     mar.Use(render.Renderer())
 //  External API
     mar.Post(
 	"/api/(?P<apikey>[a-z0-9]+)/add_pkg",
-	Filter(crs_pool,prs_pool),
+	Filter(crs_pool,lrs_pool),
 	RestAddPkg,
     )
     mar.Get(
 	"/api/(?P<apikey>[a-z0-9]+)/get_pkg/(?P<pkgid>[a-z0-9]+)",
-	Filter(crs_pool,prs_pool),
+	Filter(crs_pool,lrs_pool),
 	RestGetPkg,
+    )
+    mar.Get(
+	"/api/(?P<apikey>[a-z0-9]+)/get_state",
+	Filter(crs_pool,lrs_pool),
+	RestGetState,
     )
 //  Internal API
     mar.Get(
 	"/capi/(?P<apikey>[a-z0-9]+)/trans_pkg/(?P<pkgid>[a-z0-9]+)",
-	Filter(crs_pool,prs_pool),
+	Filter(crs_pool,lrs_pool),
 	RestTransPkg,
     )
 

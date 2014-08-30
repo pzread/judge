@@ -16,44 +16,44 @@ import (
 type Metadata map[string]interface{}
 
 type Package struct {
-    pkgid string
-    apiid string
-    when int64
-    expire int64
-    env *APIEnv
+    PkgId string
+    ApiId string
+    When int64
+    Expire int64
+    Env *APIEnv
 }
 type ErrPackageMiss struct {
-    pkgid string
+    PkgId string
 }
 func (err ErrPackageMiss) Error() string {
-    return err.pkgid
+    return err.PkgId
 }
 type ErrPackageAccess struct {
-    pkgid string
+    PkgId string
 }
 func (err ErrPackageAccess) Error() string {
-    return err.pkgid
+    return err.PkgId
 }
 /*
     Try to get the package which has been stored at local.
 */
 func (pkg *Package) Get() error {
     var err error
-    var meta map[string]interface{}
+    var meta Metadata
 
     metabuf,err := redis.Bytes(
-	pkg.env.prs.Do("HGET","PACKAGE@" + pkg.pkgid,"meta"))
+	pkg.Env.LRs.Do("HGET","PACKAGE@" + pkg.PkgId,"meta"))
     if err != nil {
-	return ErrPackageMiss{pkg.pkgid}
+	return ErrPackageMiss{pkg.PkgId}
     }
     if err := json.Unmarshal(metabuf,&meta); err != nil {
 	return err
     }
 
-    pkg.pkgid = meta["pkgid"].(string)
-    pkg.apiid = meta["apiid"].(string)
-    pkg.when = int64(meta["when"].(float64))
-    pkg.expire = int64(meta["expire"].(float64))
+    pkg.PkgId = meta["pkgid"].(string)
+    pkg.ApiId = meta["apiid"].(string)
+    pkg.When = int64(meta["when"].(float64))
+    pkg.Expire = int64(meta["expire"].(float64))
     return nil
 }
 /*
@@ -62,7 +62,7 @@ func (pkg *Package) Get() error {
     API add_pkg.
 */
 func (pkg *Package) Import(pkgfpath string) error {
-    pkgdpath,err := decompress(pkg.pkgid,pkgfpath)
+    pkgdpath,err := decompress(pkg.PkgId,pkgfpath)
     if err != nil {
 	return err
     }
@@ -71,15 +71,15 @@ func (pkg *Package) Import(pkgfpath string) error {
 	os.RemoveAll(pkgdpath)
 	return err
     }
-    meta["pkgid"] = pkg.pkgid
-    meta["apiid"] = pkg.env.apiid
+    meta["pkgid"] = pkg.PkgId
+    meta["apiid"] = pkg.Env.ApiId
     meta["when"] = time.Now().Unix()
 
     if storeMeta(&meta,pkgdpath) != nil {
 	os.RemoveAll(pkgdpath)
 	return err
     }
-    if _,err := compress(pkg.pkgid,pkgdpath); err != nil {
+    if _,err := compress(pkg.PkgId,pkgdpath); err != nil {
 	os.RemoveAll(pkgdpath)
 	return err
     }
@@ -94,14 +94,14 @@ func (pkg *Package) Import(pkgfpath string) error {
     Export nginx internal url.
 */
 func (pkg *Package) Export() string {
-    return "/package/" + pkg.pkgid + ".tar.xz"
+    return "/package/" + pkg.PkgId + ".tar.xz"
 }
 /*
     Transport package from other node.
 */
 func (pkg *Package) Transport() error {
     bind,err := redis.String(
-	pkg.env.crs.Do("SRANDMEMBER","PKG_NODE@" + pkg.pkgid))
+	pkg.Env.CRs.Do("SRANDMEMBER","PKG_NODE@" + pkg.PkgId))
     if err != nil {
 	return err
     }
@@ -109,7 +109,7 @@ func (pkg *Package) Transport() error {
 	"http://%s/capi/%s/trans_pkg/%s",
 	bind,
 	APIKEY,
-	pkg.pkgid,
+	pkg.PkgId,
     )
     trans_res,err := http.Get(url)
     if err != nil {
@@ -117,7 +117,7 @@ func (pkg *Package) Transport() error {
     }
     defer trans_res.Body.Close()
 
-    pkgfpath := STORAGE_PATH + "/package/" + pkg.pkgid + ".tar.xz"
+    pkgfpath := STORAGE_PATH + "/package/" + pkg.PkgId + ".tar.xz"
     pkgfile,err := os.Create(pkgfpath)
     if err != nil {
 	return err
@@ -129,7 +129,7 @@ func (pkg *Package) Transport() error {
 	return err
     }
 
-    pkgdpath,err := decompress(pkg.pkgid,pkgfpath)
+    pkgdpath,err := decompress(pkg.PkgId,pkgfpath)
     if err != nil {
 	os.Remove(pkgfpath)
 	return err
@@ -151,7 +151,7 @@ func (pkg *Package) Transport() error {
 }
 
 /*
-    Generate new pkgid.
+    Generate new PkgId.
 */
 func PackageGenID() string {
     return fmt.Sprintf("%x",sha256.Sum256([]byte(uuid.NewUUID().String())))
@@ -159,27 +159,30 @@ func PackageGenID() string {
 /*
     Just a helper which can create an empty package.
 */
-func PackageCreate(pkgid string,env *APIEnv) Package {
-    return Package{
-	pkgid:pkgid,
-	apiid:"",
-	when:0,
-	expire:0,
-	env:env,
+func PackageCreate(PkgId string,env *APIEnv) *Package {
+    return &Package{
+	PkgId:PkgId,
+	ApiId:"",
+	When:0,
+	Expire:0,
+	Env:env,
     }
 }
 /*
     TBD
 */
-func PackageClean(pkgid string,env *APIEnv) {
+func PackageClean(PkgId string,env *APIEnv) error {
+    env.LRs.Do("DEL","PACKAGE@" + PkgId)
+    env.CRs.Do("SREM","PKG_NODE@" + PkgId,BIND)
 
+    return nil
 }
 
 /*
-    Compress package to SOTRAGE_PATH/package/pkgid.tar.xz
+    Compress package to SOTRAGE_PATH/package/PkgId.tar.xz
 */
-func compress(pkgid string,dpath string) (string,error) {
-    fpath := STORAGE_PATH + "/package/" + pkgid + ".tar.xz"
+func compress(PkgId string,dpath string) (string,error) {
+    fpath := STORAGE_PATH + "/package/" + PkgId + ".tar.xz"
     cmd := exec.Command(TAR_PATH,"-Jcf",fpath,"-C",dpath,".")
     if err := cmd.Run(); err != nil {
 	return "",err
@@ -188,10 +191,10 @@ func compress(pkgid string,dpath string) (string,error) {
     return fpath,nil
 }
 /*
-    Decompress pkg.tar.xz to SOTRAGE_PATH/package/pkgid.
+    Decompress pkg.tar.xz to SOTRAGE_PATH/package/PkgId.
 */
-func decompress(pkgid string,fpath string) (string,error) {
-    dpath := STORAGE_PATH + "/package/" + pkgid
+func decompress(PkgId string,fpath string) (string,error) {
+    dpath := STORAGE_PATH + "/package/" + PkgId
     if err := os.Mkdir(dpath,0700); err != nil {
 	return "",err
     }
@@ -252,24 +255,26 @@ func storeMeta(meta *Metadata,dpath string) error {
     Set package metadata, update database.
 */
 func updatePackage(pkg *Package,meta Metadata) error {
-    expire := int64(meta["expire"].(float64))
+    Expire := int64(meta["expire"].(float64))
     metabuf,_ := json.Marshal(meta)
-    pkg.env.prs.Send("HSET","PACKAGE@" + pkg.pkgid,"meta",metabuf)
-    pkg.env.crs.Send("SADD","PKG_NODE@" + pkg.pkgid,BIND)
-    pkg.env.prs.Send("EXPIREAT","PACKAGE@" + pkg.pkgid,expire)
-    pkg.env.crs.Send("EXPIREAT","PKG_NODE@" + pkg.pkgid,expire)
-    pkg.env.prs.Flush()
-    pkg.env.crs.Flush()
-    pkg.env.prs.Receive()
-    pkg.env.crs.Receive()
+    pkg.Env.LRs.Send("HSET","PACKAGE@" + pkg.PkgId,"meta",metabuf)
+    pkg.Env.CRs.Send("SADD","PKG_NODE@" + pkg.PkgId,BIND)
+    pkg.Env.LRs.Send("EXPIREAT","PACKAGE@" + pkg.PkgId,Expire)
+    pkg.Env.CRs.Send("EXPIREAT","PKG_NODE@" + pkg.PkgId,Expire)
+    pkg.Env.LRs.Flush()
+    pkg.Env.CRs.Flush()
+    pkg.Env.LRs.Receive()
+    pkg.Env.CRs.Receive()
+    pkg.Env.LRs.Receive()
+    pkg.Env.CRs.Receive()
 
-    pkg.apiid = meta["apiid"].(string)
-    if when,ok := meta["when"].(float64); ok {
-	pkg.when = int64(when)
+    pkg.ApiId = meta["apiid"].(string)
+    if When,ok := meta["when"].(float64); ok {
+	pkg.When = int64(When)
     } else {
-	pkg.when = meta["when"].(int64)
+	pkg.When = meta["when"].(int64)
     }
-    pkg.expire = expire
+    pkg.Expire = Expire
 
     return nil
 }

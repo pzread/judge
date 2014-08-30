@@ -3,10 +3,10 @@ package main
 import (
     "os"
     "io"
+    "io/ioutil"
     "net/http"
     "github.com/go-martini/martini"
     "github.com/martini-contrib/render"
-//  "github.com/garyburd/redigo/redis"
 )
 
 ////////////////
@@ -28,29 +28,27 @@ func RestAddPkg(ren render.Render,req *http.Request,env *APIEnv) {
     }
 
     pkgid := PackageGenID()
-    pkgfpath := STORAGE_PATH + "/package/" + pkgid + ".tar.xz"
-    pkgfile,err := os.Create(pkgfpath)
+    pkgfile,err := ioutil.TempFile(STORAGE_PATH + "/tmp","")
     if err != nil {
 	ret["error"] = "EIO"
 	return
     }
-
+    pkgfpath := pkgfile.Name()
+    defer os.Remove(pkgfpath)
     retlen,err := io.CopyN(pkgfile,req.Body,pkglen)
     pkgfile.Close()
     if retlen != pkglen || err != nil {
-	os.Remove(pkgfpath)
 	ret["error"] = "EIO"
 	return
     }
 
     pkg := PackageCreate(pkgid,env)
     if pkg.Import(pkgfpath) != nil {
-	os.Remove(pkgfpath)
 	ret["error"] = "EINVAL"
 	return
     }
 
-    ret["pkgid"] = pkg.pkgid
+    ret["pkgid"] = pkg.PkgId
 }
 func RestGetPkg(
     res http.ResponseWriter,
@@ -60,7 +58,7 @@ func RestGetPkg(
 ) {
     pkg := PackageCreate(ram["pkgid"],env)
     err := pkg.Get()
-    if err == nil && pkg.apiid == env.apiid {
+    if err == nil && pkg.ApiId == env.ApiId {
 	res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
 	res.WriteHeader(307)
 	return
@@ -74,6 +72,14 @@ func RestGetPkg(
     }
 
     res.WriteHeader(404)
+}
+func RestGetState(ren render.Render,req *http.Request,env *APIEnv) {
+    states,err := StateClus(env)
+    if err != nil {
+	ren.JSON(200,map[string]string{"error":"EINTAL"})
+	return
+    }
+    ren.JSON(200,map[string]interface{}{"error":"","node":states})
 }
 
 ////////////////
@@ -91,7 +97,7 @@ func RestTransPkg(
     if err == nil {
 	http.ServeFile(res,req,STORAGE_PATH + pkg.Export())
     } else if _,ok := err.(ErrPackageMiss); ok {
-	PackageClean(pkg.pkgid,env)
+	PackageClean(pkg.PkgId,env)
 	res.WriteHeader(404)
     } else {
 	res.WriteHeader(404)
