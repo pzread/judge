@@ -57,7 +57,7 @@ func main() {
 	MaxIdle:4,
 	IdleTimeout:600 * time.Second,
 	Dial:func() (redis.Conn,error) {
-	    return redis.Dial("tcp","10.8.0.10:6379")
+	    return redis.Dial("tcp",CLUS_REDIS)
 	},
     }
     lrs_pool := &redis.Pool{

@@ -74,7 +74,7 @@ func RestGetPkg(
     res.WriteHeader(404)
 }
 func RestGetState(ren render.Render,req *http.Request,env *APIEnv) {
-    states,err := StateClus(env)
+    states,err := StateClus(env.CRs)
     if err != nil {
 	ren.JSON(200,map[string]string{"error":"EINTAL"})
 	return

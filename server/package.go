@@ -262,16 +262,10 @@ func modifyMeta(pkg *Package,dpath string) error {
 */
 func updatePackage(pkg *Package) error {
     metabuf,_ := json.Marshal(pkg)
-    pkg.Env.LRs.Send("HSET","PACKAGE@" + pkg.PkgId,"meta",metabuf)
-    pkg.Env.CRs.Send("SADD","PKG_NODE@" + pkg.PkgId,BIND)
-    pkg.Env.LRs.Send("EXPIREAT","PACKAGE@" + pkg.PkgId,pkg.Expire)
-    pkg.Env.CRs.Send("EXPIREAT","PKG_NODE@" + pkg.PkgId,pkg.Expire)
-    pkg.Env.LRs.Flush()
-    pkg.Env.CRs.Flush()
-    pkg.Env.LRs.Receive()
-    pkg.Env.CRs.Receive()
-    pkg.Env.LRs.Receive()
-    pkg.Env.CRs.Receive()
+    pkg.Env.LRs.Do("HSET","PACKAGE@" + pkg.PkgId,"meta",metabuf)
+    pkg.Env.CRs.Do("SADD","PKG_NODE@" + pkg.PkgId,BIND)
+    pkg.Env.LRs.Do("EXPIREAT","PACKAGE@" + pkg.PkgId,pkg.Expire)
+    pkg.Env.CRs.Do("EXPIREAT","PKG_NODE@" + pkg.PkgId,pkg.Expire)
 
     return nil
 }
