@@ -13,14 +13,12 @@ import (
     "github.com/garyburd/redigo/redis"
 )
 
-type Metadata map[string]interface{}
-
 type Package struct {
-    PkgId string
-    ApiId string
-    When int64
-    Expire int64
-    Env *APIEnv
+    PkgId string    `json:"-"`
+    ApiId string    `json:"apiid,omitempty"`
+    When int64	    `json:"when,omitempty"`
+    Expire int64    `json:"expire"`
+    Env *APIEnv	    `json:"-"`
 }
 type ErrPackageMiss struct {
     PkgId string
@@ -39,21 +37,16 @@ func (err ErrPackageAccess) Error() string {
 */
 func (pkg *Package) Get() error {
     var err error
-    var meta Metadata
 
     metabuf,err := redis.Bytes(
 	pkg.Env.LRs.Do("HGET","PACKAGE@" + pkg.PkgId,"meta"))
     if err != nil {
 	return ErrPackageMiss{pkg.PkgId}
     }
-    if err := json.Unmarshal(metabuf,&meta); err != nil {
+    if err := json.Unmarshal(metabuf,&pkg); err != nil {
 	return err
     }
 
-    pkg.PkgId = meta["pkgid"].(string)
-    pkg.ApiId = meta["apiid"].(string)
-    pkg.When = int64(meta["when"].(float64))
-    pkg.Expire = int64(meta["expire"].(float64))
     return nil
 }
 /*
@@ -66,16 +59,14 @@ func (pkg *Package) Import(pkgfpath string) error {
     if err != nil {
 	return err
     }
-    meta,err := loadMeta(pkgdpath)
-    if err != nil {
+    if err := loadMeta(pkg,pkgdpath); err != nil {
 	os.RemoveAll(pkgdpath)
 	return err
     }
-    meta["pkgid"] = pkg.PkgId
-    meta["apiid"] = pkg.Env.ApiId
-    meta["when"] = time.Now().Unix()
+    pkg.ApiId = pkg.Env.ApiId
+    pkg.When = time.Now().Unix()
 
-    if storeMeta(&meta,pkgdpath) != nil {
+    if err := modifyMeta(pkg,pkgdpath); err != nil {
 	os.RemoveAll(pkgdpath)
 	return err
     }
@@ -83,7 +74,7 @@ func (pkg *Package) Import(pkgfpath string) error {
 	os.RemoveAll(pkgdpath)
 	return err
     }
-    if err := updatePackage(pkg,meta); err != nil {
+    if err := updatePackage(pkg); err != nil {
 	os.RemoveAll(pkgdpath)
 	return err
     }
@@ -135,13 +126,12 @@ func (pkg *Package) Transport() error {
 	return err
     }
 
-    meta,err := loadMeta(pkgdpath)
-    if err != nil {
+    if err := loadMeta(pkg,pkgdpath); err != nil {
 	os.Remove(pkgfpath)
 	os.RemoveAll(pkgdpath)
 	return err
     }
-    if err := updatePackage(pkg,meta); err != nil {
+    if err := updatePackage(pkg); err != nil {
 	os.Remove(pkgfpath)
 	os.RemoveAll(pkgdpath)
 	return err
@@ -209,43 +199,59 @@ func decompress(PkgId string,fpath string) (string,error) {
 /*
     Load metadata from meta.json.
 */
-func loadMeta(dpath string) (Metadata,error) {
-    var meta Metadata
-
+func loadMeta(pkg *Package,dpath string) error {
     metafile,err := os.Open(dpath + "/meta.json")
     if err != nil {
 	os.RemoveAll(dpath)
-	return Metadata{},err
+	return err
     }
     metabuf := make([]byte,PKGMETA_MAXSIZE)
     metalen,err := metafile.Read(metabuf);
     metafile.Close()
     if err != nil {
 	os.RemoveAll(dpath)
-	return Metadata{},err
+	return err
     }
-    if err := json.Unmarshal(metabuf[:metalen],&meta); err != nil {
+    if err := json.Unmarshal(metabuf[:metalen],pkg); err != nil {
 	os.RemoveAll(dpath)
-	return Metadata{},err
+	return err
     }
 
-    return meta,nil
+    return nil
 }
 /*
-    Store metadata to meta.json.
+    Modify metadata to meta.json.
 */
-func storeMeta(meta *Metadata,dpath string) error {
-    metabuf,err := json.Marshal(meta)
+func modifyMeta(pkg *Package,dpath string) error {
+    var meta map[string]interface{}
+
+    metafile,err := os.OpenFile(dpath + "/meta.json",os.O_RDWR,0644)
     if err != nil {
 	return err
     }
-    metafile,err := os.Create(dpath + "/meta.json")
+    defer metafile.Close()
+
+    readbuf := make([]byte,PKGMETA_MAXSIZE)
+    metalen,err := metafile.Read(readbuf);
     if err != nil {
 	return err
     }
-    _,err = metafile.Write(metabuf)
-    metafile.Close()
+    if err := json.Unmarshal(readbuf[:metalen],&meta); err != nil {
+	return err
+    }
+
+    meta["pkgid"] = pkg.PkgId
+    meta["apiid"] = pkg.ApiId
+    meta["when"] = pkg.When
+    meta["expire"] = pkg.Expire
+
+    writebuf,err := json.MarshalIndent(meta,"","\t")
     if err != nil {
+	return err
+    }
+    _,err = metafile.WriteAt(writebuf,0)
+    if err != nil {
+	fmt.Println(err)
 	return err
     }
 
@@ -254,27 +260,18 @@ func storeMeta(meta *Metadata,dpath string) error {
 /*
     Set package metadata, update database.
 */
-func updatePackage(pkg *Package,meta Metadata) error {
-    Expire := int64(meta["expire"].(float64))
-    metabuf,_ := json.Marshal(meta)
+func updatePackage(pkg *Package) error {
+    metabuf,_ := json.Marshal(pkg)
     pkg.Env.LRs.Send("HSET","PACKAGE@" + pkg.PkgId,"meta",metabuf)
     pkg.Env.CRs.Send("SADD","PKG_NODE@" + pkg.PkgId,BIND)
-    pkg.Env.LRs.Send("EXPIREAT","PACKAGE@" + pkg.PkgId,Expire)
-    pkg.Env.CRs.Send("EXPIREAT","PKG_NODE@" + pkg.PkgId,Expire)
+    pkg.Env.LRs.Send("EXPIREAT","PACKAGE@" + pkg.PkgId,pkg.Expire)
+    pkg.Env.CRs.Send("EXPIREAT","PKG_NODE@" + pkg.PkgId,pkg.Expire)
     pkg.Env.LRs.Flush()
     pkg.Env.CRs.Flush()
     pkg.Env.LRs.Receive()
     pkg.Env.CRs.Receive()
     pkg.Env.LRs.Receive()
     pkg.Env.CRs.Receive()
-
-    pkg.ApiId = meta["apiid"].(string)
-    if When,ok := meta["when"].(float64); ok {
-	pkg.When = int64(When)
-    } else {
-	pkg.When = meta["when"].(int64)
-    }
-    pkg.Expire = Expire
 
     return nil
 }
