@@ -1,0 +1,48 @@
+@import "blk-inc.less";
+
+body{
+    background-color:@black;
+}
+div#nav{
+    a.test{
+	.nav-itm(@purple);
+    }
+    a.night{
+	.nav-itm(@green);
+    }
+}
+table#nodestate{
+    td.bind{
+	font-family:monospace;
+    }
+    td.on::after{
+	    content:"☺";
+	    color:@green;
+    }
+    td.off::after{
+	    content:"☹";
+	    color:@red;
+    }
+}
+div.gear{
+    padding:16px 16px;
+    & > div{
+	width:60px;
+	height:60px;
+	margin:0px auto;
+	padding:0px 0px 0px 0px;
+	background-image:url("http://i.imgur.com/GR7smbi.png");
+	background-size:contain;
+	-webkit-animation:spin 3s;
+	-webkit-animation-timing-function:linear;
+	-webkit-animation-iteration-count:infinite;
+    }
+}
+@-webkit-keyframes spin{
+    from{
+	-webkit-transform:rotate(0deg);
+    }
+    to{
+	-webkit-transform:rotate(360deg);
+    }
+}
