@@ -1,5 +1,5 @@
 upstream backend{
-	server 10.8.0.6:3000;
+	server 10.8.0.1:3000;
 }
 
 server {

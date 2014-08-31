@@ -57,7 +57,7 @@ func main() {
 	MaxIdle:4,
 	IdleTimeout:600 * time.Second,
 	Dial:func() (redis.Conn,error) {
-	    return redis.Dial("tcp",CLUS_REDIS)
+	    return redis.Dial("tcp",DB_BIND)
 	},
     }
     lrs_pool := &redis.Pool{
