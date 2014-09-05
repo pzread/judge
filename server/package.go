@@ -264,7 +264,6 @@ func modifyMeta(pkg *Package,dpath string) error {
     }
     _,err = metafile.WriteAt(writebuf,0)
     if err != nil {
-	fmt.Println(err)
 	return err
     }
 
@@ -308,6 +307,7 @@ func tranportPackage(
 		PkgFpath:STORAGE_PATH + "/package/" + pkgid + ".tar.xz",
 		Event:sync.NewCond(&sync.Mutex{}),
 		Err:nil,
+		Size:0,
 	    }
 	    if _,err := os.Create(port.PkgFpath); err != nil {
 		reterr = err
@@ -326,14 +326,18 @@ func tranportPackage(
 
     if tranflag {
 	go func(port *PackagePort,pkgtran *PackageTransport) {
-	    if err := doTransport(port,pkgtran); err != nil {
-		pkgtran.Lock.Lock()
+	    err := doTransport(port,pkgtran)
 
+	    pkgtran.Lock.Lock()
+
+	    if err != nil {
 		os.Remove(port.PkgFpath)
-		delete(pkgtran.Port,port.PkgId)
+	    }
+	    delete(pkgtran.Port,port.PkgId)
 
-		pkgtran.Lock.Unlock()
+	    pkgtran.Lock.Unlock()
 
+	    if err != nil {
 		port.Event.L.Lock()
 
 		port.Err = err
@@ -372,7 +376,7 @@ func doTransport(port *PackagePort,pkgtran *PackageTransport) error {
     }
     defer tran_res.Body.Close()
 
-    pkgfile,err := os.Open(port.PkgFpath)
+    pkgfile,err := os.OpenFile(port.PkgFpath,os.O_WRONLY,0644)
     if err != nil {
 	return err
     }
@@ -381,11 +385,15 @@ func doTransport(port *PackagePort,pkgtran *PackageTransport) error {
     buf := make([]byte,65536)
     for {
 	retlen,err := tran_res.Body.Read(buf)
-	pkgfile.Write(buf[:retlen])
+	retlen,err = pkgfile.Write(buf[:retlen])
+	if retlen == 0 && err == nil {
+	    err = io.EOF
+	}
 
 	port.Event.L.Lock()
 
 	port.Err = err
+	port.Size += int64(retlen)
 
 	port.Event.L.Unlock()
 	port.Event.Broadcast()
@@ -394,7 +402,6 @@ func doTransport(port *PackagePort,pkgtran *PackageTransport) error {
 	    break
 	}
     }
-    fmt.Println(err)
     if err != io.EOF {
 	return err
     }

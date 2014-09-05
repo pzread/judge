@@ -3,7 +3,6 @@ package main
 import (
     "os"
     "io"
-    "fmt"
     "io/ioutil"
     "net/http"
     "github.com/go-martini/martini"
@@ -59,7 +58,6 @@ func RestGetPkg(
 ) {
     pkg := PackageCreate(ram["pkgid"],env)
     err := pkg.Get()
-    fmt.Println(err)
     if err == nil && pkg.ApiId == env.ApiId {
 	res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
 	res.WriteHeader(307)
