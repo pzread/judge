@@ -6,12 +6,62 @@ import (
     "os/exec"
     "fmt"
     "time"
+    "sync"
     "net/http"
     "crypto/sha256"
     "encoding/json"
     "code.google.com/p/go-uuid/uuid"
     "github.com/garyburd/redigo/redis"
 )
+
+type PackagePort struct {
+    PkgId string
+    PkgFpath string
+    Event *sync.Cond
+    Err error
+    Size int64
+}
+type PackageTransport struct {
+    Port map[string]*PackagePort
+    Lock *sync.Mutex
+    CRsPl *redis.Pool
+    LRsPl *redis.Pool
+}
+type PackageReader struct {
+    PkgFile *os.File
+    Port *PackagePort
+}
+/*
+    Package tranport reader
+*/
+func (reader PackageReader) Read(buf []byte) (int,error) {
+    var retlen int
+    var reterr error
+
+    oldsize := reader.Port.Size
+    retlen,reterr = reader.PkgFile.Read(buf)
+    if retlen == 0 && reterr == io.EOF {
+	reader.Port.Event.L.Lock()
+
+	if oldsize == reader.Port.Size && reader.Port.Err == nil {
+	    reader.Port.Event.Wait()
+	}
+
+	reader.Port.Event.L.Unlock()
+
+	if oldsize < reader.Port.Size {
+	    retlen,reterr = reader.PkgFile.Read(buf)
+	} else {
+	    retlen = 0
+	    reterr = reader.Port.Err
+	}
+    }
+
+    return retlen,reterr
+}
+func (reader PackageReader) Close() error {
+    return reader.PkgFile.Close()
+}
 
 type Package struct {
     PkgId string    `json:"-"`
@@ -24,6 +74,12 @@ type ErrPackageMiss struct {
     PkgId string
 }
 func (err ErrPackageMiss) Error() string {
+    return err.PkgId
+}
+type ErrPackageHit struct {
+    PkgId string
+}
+func (err ErrPackageHit) Error() string {
     return err.PkgId
 }
 type ErrPackageAccess struct {
@@ -90,54 +146,9 @@ func (pkg *Package) Export() string {
 /*
     Transport package from other node.
 */
-func (pkg *Package) Transport() error {
-    bind,err := redis.String(
-	pkg.Env.CRs.Do("SRANDMEMBER","PKG_NODE@" + pkg.PkgId))
-    if err != nil {
-	return err
-    }
-    url := fmt.Sprintf(
-	"http://%s/capi/%s/trans_pkg/%s",
-	bind,
-	APIKEY,
-	pkg.PkgId,
-    )
-    trans_res,err := http.Get(url)
-    if err != nil {
-	return err
-    }
-    defer trans_res.Body.Close()
-
-    pkgfpath := STORAGE_PATH + "/package/" + pkg.PkgId + ".tar.xz"
-    pkgfile,err := os.Create(pkgfpath)
-    if err != nil {
-	return err
-    }
-    _,err = io.Copy(pkgfile,trans_res.Body)
-    pkgfile.Close()
-    if err != nil {
-	os.Remove(pkgfpath)
-	return err
-    }
-
-    pkgdpath,err := decompress(pkg.PkgId,pkgfpath)
-    if err != nil {
-	os.Remove(pkgfpath)
-	return err
-    }
-
-    if err := loadMeta(pkg,pkgdpath); err != nil {
-	os.Remove(pkgfpath)
-	os.RemoveAll(pkgdpath)
-	return err
-    }
-    if err := updatePackage(pkg); err != nil {
-	os.Remove(pkgfpath)
-	os.RemoveAll(pkgdpath)
-	return err
-    }
-
-    return nil
+func (pkg *Package) Transport() (io.ReadCloser,error) {
+    reader,err := tranportPackage(pkg.PkgId,pkg.Env.PkgTran,pkg.Env.CRs)
+    return reader,err
 }
 
 /*
@@ -164,9 +175,11 @@ func PackageCreate(PkgId string,env *APIEnv) *Package {
 func PackageClean(PkgId string,env *APIEnv) error {
     env.LRs.Do("DEL","PACKAGE@" + PkgId)
     env.CRs.Do("SREM","PKG_NODE@" + PkgId,BIND)
-
     return nil
 }
+/*
+    Transport Core loop
+*/
 
 /*
     Compress package to SOTRAGE_PATH/package/PkgId.tar.xz
@@ -266,6 +279,144 @@ func updatePackage(pkg *Package) error {
     pkg.Env.CRs.Do("SADD","PKG_NODE@" + pkg.PkgId,BIND)
     pkg.Env.LRs.Do("EXPIREAT","PACKAGE@" + pkg.PkgId,pkg.Expire)
     pkg.Env.CRs.Do("EXPIREAT","PKG_NODE@" + pkg.PkgId,pkg.Expire)
+
+    return nil
+}
+func tranportPackage(
+    pkgid string,
+    pkgtran *PackageTransport,
+    lrs redis.Conn,
+) (PackageReader,error) {
+    var reterr error
+
+    reader := PackageReader{}
+    tranflag := false
+    reterr = nil
+
+    pkgtran.Lock.Lock()
+
+    port,ok := pkgtran.Port[pkgid]
+    if !ok {
+	exist,err := redis.Int(lrs.Do("EXISTS","PACKAGE@" + pkgid))
+	if err != nil {
+	    reterr = err
+	} else if exist == 1 {
+	    reterr = ErrPackageHit{pkgid}
+	} else {
+	    port = &PackagePort{
+		PkgId:pkgid,
+		PkgFpath:STORAGE_PATH + "/package/" + pkgid + ".tar.xz",
+		Event:sync.NewCond(&sync.Mutex{}),
+		Err:nil,
+	    }
+	    if _,err := os.Create(port.PkgFpath); err != nil {
+		reterr = err
+	    } else {
+		pkgtran.Port[pkgid] = port
+		tranflag = true
+	    }
+	}
+    }
+
+    pkgtran.Lock.Unlock()
+
+    if reterr != nil {
+	return reader,reterr
+    }
+
+    if tranflag {
+	go func(port *PackagePort,pkgtran *PackageTransport) {
+	    if err := doTransport(port,pkgtran); err != nil {
+		pkgtran.Lock.Lock()
+
+		os.Remove(port.PkgFpath)
+		delete(pkgtran.Port,port.PkgId)
+
+		pkgtran.Lock.Unlock()
+
+		port.Event.L.Lock()
+
+		port.Err = err
+
+		port.Event.L.Unlock()
+		port.Event.Broadcast()
+	    }
+	}(port,pkgtran)
+    }
+
+    reader.PkgFile,_ = os.Open(port.PkgFpath)
+    reader.Port = port
+
+    return reader,nil
+}
+func doTransport(port *PackagePort,pkgtran *PackageTransport) error {
+    var err error
+
+    crs := pkgtran.CRsPl.Get()
+    crs.Do("SELECT",1)
+
+    bind,err := redis.String(
+	crs.Do("SRANDMEMBER","PKG_NODE@" + port.PkgId))
+    if err != nil {
+	return err
+    }
+    url := fmt.Sprintf(
+	"http://%s/capi/%s/tran_pkg/%s",
+	bind,
+	APIKEY,
+	port.PkgId,
+    )
+    tran_res,err := http.Get(url)
+    if err != nil {
+	return err
+    }
+    defer tran_res.Body.Close()
+
+    pkgfile,err := os.Open(port.PkgFpath)
+    if err != nil {
+	return err
+    }
+    defer pkgfile.Close()
+
+    buf := make([]byte,65536)
+    for {
+	retlen,err := tran_res.Body.Read(buf)
+	pkgfile.Write(buf[:retlen])
+
+	port.Event.L.Lock()
+
+	port.Err = err
+
+	port.Event.L.Unlock()
+	port.Event.Broadcast()
+
+	if err != nil {
+	    break
+	}
+    }
+    fmt.Println(err)
+    if err != io.EOF {
+	return err
+    }
+
+    /*
+    pkgdpath,err := decompress(port.PkgId,pkgfpath)
+    if err != nil {
+	os.Remove(pkgfpath)
+	return err
+    }
+
+    if err := loadMeta(pkg,pkgdpath); err != nil {
+	os.Remove(pkgfpath)
+	os.RemoveAll(pkgdpath)
+	return err
+    }
+    if err := updatePackage(pkg); err != nil {
+	os.Remove(pkgfpath)
+	os.RemoveAll(pkgdpath)
+	return err
+    }
+    */
 
     return nil
 }

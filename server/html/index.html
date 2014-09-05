@@ -22,10 +22,10 @@ $(document).ready(function(){
 	var pkg = $('#pkg')[0].files[0];
 	var j_bar = $('#prog > .bar');
 	var j_result = $('#result');
-	var j_result_gear = $('#result-gear');
+	var j_result_spin = $('#result-spin');
 
 	j_result.hide();
-	j_result_gear.show();
+	j_result_spin.show();
 	$.ajax({
 	    'url':'/judge/api/' + api_key + '/add_pkg',
 	    'type':'POST',
@@ -42,7 +42,7 @@ $(document).ready(function(){
 		return xhr;
 	    },
 	    'success':function(res){
-		j_result_gear.hide();
+		j_result_spin.hide();
 		j_result.text(JSON.stringify(res,null,'  '));
 		hljs.highlightBlock(j_result[0]);
 		j_result.show();
@@ -113,7 +113,7 @@ $(document).ready(function(){
 	    <div class="blk-cont blk-plant" style="margin-top:16px;">
 		<h4>回傳值</h4>
 		<pre><code id="result" class="json" style="display:none;"></code></pre>
-		<div id="result-gear"class="gear" style="margin-top:-32px; display:none;"><div></div></div>
+		<div id="result-spin"class="spin" style="margin-top:-32px; display:none;"><div></div></div>
 	    </div>
 	</div>
 	<div class="g-md-4"><div class="blk-cont blk-plant">

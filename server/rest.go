@@ -3,6 +3,7 @@ package main
 import (
     "os"
     "io"
+    "fmt"
     "io/ioutil"
     "net/http"
     "github.com/go-martini/martini"
@@ -58,15 +59,16 @@ func RestGetPkg(
 ) {
     pkg := PackageCreate(ram["pkgid"],env)
     err := pkg.Get()
+    fmt.Println(err)
     if err == nil && pkg.ApiId == env.ApiId {
 	res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
 	res.WriteHeader(307)
 	return
     } else if _,ok := err.(ErrPackageMiss); ok {
-	err = pkg.Transport()
-	if err == nil {
-	    res.Header().Set("X-Accel-Redirect","/internal" + pkg.Export())
-	    res.WriteHeader(307)
+	if reader,err := pkg.Transport(); err == nil {
+	    res.WriteHeader(200)
+	    io.Copy(res,reader)
+	    reader.Close()
 	    return
 	}
     }
@@ -86,7 +88,7 @@ func RestGetState(ren render.Render,req *http.Request,env *APIEnv) {
 //Internal API//
 ////////////////
 
-func RestTransPkg(
+func RestTranPkg(
     res http.ResponseWriter,
     req *http.Request,
     ram martini.Params,

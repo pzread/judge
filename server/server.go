@@ -4,6 +4,7 @@ import (
     "fmt"
     "log"
     "time"
+    "sync"
     "syscall"
     "github.com/go-martini/martini"
     "github.com/martini-contrib/render"
@@ -15,9 +16,14 @@ type APIEnv struct {
     ApiKey string
     CRs redis.Conn
     LRs redis.Conn
+    PkgTran *PackageTransport
 }
 
-func Filter(crs_pool *redis.Pool,lrs_pool *redis.Pool) martini.Handler {
+func Filter(
+    crspl *redis.Pool,
+    lrspl *redis.Pool,
+    pkgtran *PackageTransport,
+) martini.Handler {
     return func(
 	ctx martini.Context,
 	pam martini.Params,
@@ -27,9 +33,9 @@ func Filter(crs_pool *redis.Pool,lrs_pool *redis.Pool) martini.Handler {
 	apikey := pam["apikey"]
 	log.Println("API Key = ",apikey)
 
-	crs := crs_pool.Get()
+	crs := crspl.Get()
 	crs.Do("SELECT",1)
-	lrs := lrs_pool.Get()
+	lrs := lrspl.Get()
 	lrs.Do("SELECT",2)
 
 	apiid,err := redis.String(crs.Do("GET","APIKEY@" + apikey))
@@ -43,6 +49,7 @@ func Filter(crs_pool *redis.Pool,lrs_pool *redis.Pool) martini.Handler {
 	    apikey,
 	    crs,
 	    lrs,
+	    pkgtran,
 	})
     }
 }
@@ -53,22 +60,28 @@ func main() {
     martini.Env = "production"
     DropPriv()
 
-    crs_pool := &redis.Pool{
+    crspl := &redis.Pool{
 	MaxIdle:4,
 	IdleTimeout:600 * time.Second,
 	Dial:func() (redis.Conn,error) {
 	    return redis.Dial("tcp",CRS_BIND)
 	},
     }
-    lrs_pool := &redis.Pool{
+    lrspl := &redis.Pool{
 	MaxIdle:4,
 	IdleTimeout:600 * time.Second,
 	Dial:func() (redis.Conn,error) {
 	    return redis.Dial("tcp","127.0.0.1:6379")
 	},
     }
+    pkgtran := &PackageTransport{
+	Port:map[string]*PackagePort{},
+	Lock:&sync.Mutex{},
+	CRsPl:crspl,
+	LRsPl:lrspl,
+    }
 
-    crs := crs_pool.Get()
+    crs := crspl.Get()
     crs.Do("SELECT",1)
     go StateBeat(crs)
 
@@ -77,24 +90,24 @@ func main() {
 //  External API
     mar.Post(
 	"/api/(?P<apikey>[a-z0-9]+)/add_pkg",
-	Filter(crs_pool,lrs_pool),
+	Filter(crspl,lrspl,pkgtran),
 	RestAddPkg,
     )
     mar.Get(
 	"/api/(?P<apikey>[a-z0-9]+)/get_pkg/(?P<pkgid>[a-z0-9]+)",
-	Filter(crs_pool,lrs_pool),
+	Filter(crspl,lrspl,pkgtran),
 	RestGetPkg,
     )
     mar.Get(
 	"/api/(?P<apikey>[a-z0-9]+)/get_state",
-	Filter(crs_pool,lrs_pool),
+	Filter(crspl,lrspl,pkgtran),
 	RestGetState,
     )
 //  Internal API
     mar.Get(
-	"/capi/(?P<apikey>[a-z0-9]+)/trans_pkg/(?P<pkgid>[a-z0-9]+)",
-	Filter(crs_pool,lrs_pool),
-	RestTransPkg,
+	"/capi/(?P<apikey>[a-z0-9]+)/tran_pkg/(?P<pkgid>[a-z0-9]+)",
+	Filter(crspl,lrspl,pkgtran),
+	RestTranPkg,
     )
 
     fmt.Println("Night Server")

@@ -24,7 +24,7 @@ table#nodestate{
 	    color:@red;
     }
 }
-div.gear{
+div.spin{
     padding:16px 16px;
     & > div{
 	width:60px;
@@ -33,16 +33,28 @@ div.gear{
 	padding:0px 0px 0px 0px;
 	background-image:url("http://i.imgur.com/GR7smbi.png");
 	background-size:contain;
+	
+	animation:spin 3s;
+	animation-timing-function:linear;
+	animation-iteration-count:infinite;
 	-webkit-animation:spin 3s;
 	-webkit-animation-timing-function:linear;
 	-webkit-animation-iteration-count:infinite;
     }
 }
-@-webkit-keyframes spin{
+.spin{
     from{
+	transform:rotate(0deg);
 	-webkit-transform:rotate(0deg);
     }
     to{
+	transform:rotate(360deg);
 	-webkit-transform:rotate(360deg);
     }
+}
+@keyframes spin{
+    .spin
+}
+@-webkit-keyframes spin{
+    .spin
 }
