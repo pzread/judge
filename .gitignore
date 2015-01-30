@@ -1,3 +1,4 @@
+.*
 *.swp
 
 *.o
@@ -7,6 +8,7 @@
 __pycache__/
 *.css
 
+hypex/bin/
 snapshot/
 container/
 testdata/
