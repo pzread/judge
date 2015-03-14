@@ -1,15 +1,15 @@
 #include<stdio.h>
 #include<unistd.h>
-#include<string>
-#include<memory>
 
 #ifndef _UTILS_H_
 #define _UTILS_H_
 
-#define err(...) internal_err(LOG_PREFIX,##__VA_ARGS__)
-#define info(...) internal_info(LOG_PREFIX,##__VA_ARGS__)
+#define err(fmt,...) internal_err(LOG_PREFIX,fmt,##__VA_ARGS__)
+#define info(fmt,...) internal_info(LOG_PREFIX,fmt,##__VA_ARGS__)
+#define dbg(fmt,...) internal_dbg(LOG_PREFIX,fmt,##__VA_ARGS__)
 
-void internal_err(std::string prefix,std::string fmt,...);
-void internal_info(std::string prefix,std::string fmt,...);
+void internal_err(const char *prefix,const char *fmt,...);
+void internal_info(const char *prefix,const char *fmt,...);
+void internal_dbg(const char *prefix,const char *fmt,...);
 
 #endif

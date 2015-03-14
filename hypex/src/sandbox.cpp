@@ -4,6 +4,7 @@
 #include<stdlib.h>
 #include<stdint.h>
 #include<stddef.h>
+#include<errno.h>
 #include<fcntl.h>
 #include<limits.h>
 #include<unistd.h>
@@ -19,6 +20,30 @@
 #include<linux/seccomp.h>
 #include"utils.h"
 
+static int read_stat(
+	pid_t pid,
+	unsigned long *utime,
+	unsigned long *stime,
+	unsigned long *vmem
+) {
+	char statpath[PATH_MAX + 1];
+	FILE *f;
+
+	snprintf(statpath,sizeof(statpath),"/proc/%u/stat",pid);
+	if((f = fopen(statpath,"rb")) == NULL) {
+		return -1;
+	}
+	fscanf(f,"%*d (%*[^)]) %*c %*d %*d %*d %*d %*d %*u %*d %*d %*d " \
+		"%*d %lu %lu %*d %*d %*d %*d %*d %*d %*d %lu %*d " \
+		"%*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d " \
+		"%*d %*d %*d %*u %*d %*d %*d %*d %*d %*d %*d %*d "
+		"%*d %*d %*d",utime,stime,vmem);
+	fclose(f);
+	*utime = (*utime * 1000UL) / sysconf(_SC_CLK_TCK);
+	*stime = (*stime * 1000UL) / sysconf(_SC_CLK_TCK);
+	return 0;
+}
+
 static int install_limit () {
 	int ret;
 	struct itimerval time;
@@ -26,7 +51,7 @@ static int install_limit () {
 	time.it_interval.tv_sec = 0;
 	time.it_interval.tv_usec = 0;
 	time.it_value.tv_sec = 3;
-	time.it_value.tv_usec = 0;
+	time.it_value.tv_usec = 1000;
 	signal(SIGVTALRM,SIG_DFL);
 	if((ret = setitimer(ITIMER_VIRTUAL,&time,NULL))) {
 		return ret;
@@ -99,18 +124,21 @@ static int trace_loop(pid_t pid) {
 				PTRACE_SETOPTIONS,
 				pid,
 				NULL,
-				PTRACE_O_EXITKILL | PTRACE_O_TRACESECCOMP
+				PTRACE_O_EXITKILL |
+				PTRACE_O_TRACEEXIT |
+				PTRACE_O_TRACESECCOMP
 			)) {
 				return -1;
 			}
-
 			snprintf(mempath,sizeof(mempath),"/proc/%u/mem",pid);
 			memfd = open(mempath,O_RDWR | O_CLOEXEC);
-
-			stage = 1;
 			ptrace(PTRACE_CONT,pid,NULL,NULL);
+			stage = 1;
+			dbg("start\n");
 		} else if(siginfo.si_code == CLD_TRAPPED) {
-			if(siginfo.si_status >> 8 == PTRACE_EVENT_SECCOMP) {
+			if(siginfo.si_status == (
+				SIGTRAP | (PTRACE_EVENT_SECCOMP << 8)
+			)) {
 				unsigned long nr;
 				struct user_regs_struct regs;
 				sigset_t sigset;
@@ -128,11 +156,29 @@ static int trace_loop(pid_t pid) {
 						sizeof(sigset),
 						regs.rsi);
 				}
-
+				ptrace(PTRACE_CONT,pid,NULL,NULL);
+			} else if(siginfo.si_status == (
+				SIGTRAP | (PTRACE_EVENT_EXIT << 8)
+			)) {
+				unsigned long utime,stime,vmem;
+				read_stat(pid,&utime,&stime,&vmem);
+				dbg("ut:%lu st:%lu vm:%lu\n",utime,stime,vmem);
 				ptrace(PTRACE_CONT,pid,NULL,NULL);
 			} else {
-				ptrace(PTRACE_CONT,pid,NULL,SIGVTALRM);
+				ptrace(PTRACE_CONT,
+					pid,
+					NULL,
+					siginfo.si_status & 0xFF);
 			}
+		} else if(siginfo.si_code == CLD_KILLED ||
+			siginfo.si_code == CLD_DUMPED ||
+			siginfo.si_code == CLD_STOPPED
+		) {
+			dbg("error exit\n");
+		} else if(siginfo.si_code == CLD_EXITED) {
+			dbg("general exit\n");
+		} else {
+			err("unexcepted si_code %d\n",siginfo.si_code);
 		}
 	}
 	return 0;
