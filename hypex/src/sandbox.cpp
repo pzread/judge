@@ -18,6 +18,7 @@
 #include<linux/audit.h>
 #include<linux/filter.h>
 #include<linux/seccomp.h>
+#include<libcgroup.h>
 #include"utils.h"
 
 static int read_stat(
@@ -30,7 +31,7 @@ static int read_stat(
 	FILE *f;
 
 	snprintf(statpath,sizeof(statpath),"/proc/%u/stat",pid);
-	if((f = fopen(statpath,"rb")) == NULL) {
+	if((f = fopen(statpath,"r")) == NULL) {
 		return -1;
 	}
 	fscanf(f,"%*d (%*[^)]) %*c %*d %*d %*d %*d %*d %*u %*d %*d %*d " \
@@ -44,18 +45,26 @@ static int read_stat(
 	return 0;
 }
 
-static int install_limit () {
+static int install_limit(unsigned long msec) {
 	int ret;
 	struct itimerval time;
 
 	time.it_interval.tv_sec = 0;
 	time.it_interval.tv_usec = 0;
-	time.it_value.tv_sec = 3;
-	time.it_value.tv_usec = 1000;
+	time.it_value.tv_sec = (msec + 1) / 1000;
+	time.it_value.tv_usec = ((msec + 1) % 1000) * 1000;
 	signal(SIGVTALRM,SIG_DFL);
 	if((ret = setitimer(ITIMER_VIRTUAL,&time,NULL))) {
 		return ret;
 	}
+	/*time.it_interval.tv_sec = 0;
+	time.it_interval.tv_usec = 0;
+	time.it_value.tv_sec = msec * 4 / 1000;
+	time.it_value.tv_usec = ((msec * 4) % 1000) * 1000;
+	signal(SIGALRM,SIG_DFL);
+	if((ret = setitimer(ITIMER_REAL,&time,NULL))) {
+		return ret;
+	}*/
 
 	return 0;
 }
@@ -187,17 +196,31 @@ static int trace_loop(pid_t pid) {
 int main(int argc,char *argv[]){
 	pid_t pid;
 
+	struct cgroup *cg;
+	struct cgroup_controller *cgcl;
+	char *clpath,tpath[PATH_MAX + 1];
+	FILE *f;
+	int oom;
+
 	if(argc < 2) {
 		return 0;
 	}
 
+	cgroup_init();
+	cg = cgroup_new_cgroup("hypex");
+	cgcl = cgroup_add_controller(cg,"memory");
+	cgroup_set_value_uint64(cgcl,"memory.swappiness",0);
+	cgroup_set_value_uint64(cgcl,"memory.oom_control",1);
+	cgroup_set_value_uint64(cgcl,"memory.limit_in_bytes",65536 * 1024);
+	cgroup_create_cgroup(cg,0);
+	
 	if((pid = fork()) == 0) {
 		char *child_argv[] = {argv[1],NULL};
 		char *child_envp[] = {NULL};
 
 		ptrace(PTRACE_TRACEME,0,NULL,NULL);
 
-		if(install_limit()) {
+		if(install_limit(3000)) {
 			_exit(0);
 		}
 		if(prctl(PR_SET_NO_NEW_PRIVS,1,0,0,0)) {
@@ -207,11 +230,26 @@ int main(int argc,char *argv[]){
 			_exit(0);
 		}
 
+		cgroup_attach_task(cg);
+		cgroup_free(&cg);
+
 		execve(argv[1],child_argv,child_envp);
 		_exit(0);
 	}
 
 	trace_loop(pid);
+
+	cgroup_get_subsys_mount_point("memory",&clpath);
+	snprintf(tpath,sizeof(tpath),"%s/hypex/memory.oom_control",clpath);
+	f = fopen(tpath,"r");
+	fscanf(f,"oom_kill_disable %*d\n");
+	fscanf(f,"under_oom %d\n",&oom);
+	dbg("%d\n",oom);
+	fclose(f);
+	free(clpath);
+
+	cgroup_delete_cgroup(cg,0);
+	cgroup_free(&cg);
 
 	return 0;
 }
