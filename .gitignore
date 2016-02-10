@@ -8,12 +8,4 @@
 __pycache__/
 *.css
 
-hypex/bin/
-snapshot/
-container/
-testdata/
-templ/
-tmp/
-cgroup/
-build/
-klib/
+hypex/test/
