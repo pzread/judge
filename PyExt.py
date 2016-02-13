@@ -14,13 +14,19 @@ def init():
         } eventpair;
     ''')
     ffi.cdef('''int init();''')
-    ffi.cdef('''int destroy();''')
     ffi.cdef('''int ev_register(int fd, int events);''')
     ffi.cdef('''int ev_unregister(int fd);''')
     ffi.cdef('''int ev_modify(int fd, int events);''')
     ffi.cdef('''int ev_poll(long timeout, eventpair ret[], int maxevts);''')
+    ffi.cdef('''int create_task(char exepath[]);''')
     pyextlib = ffi.dlopen('lib/libpyext.so')
     pyextlib.init()
+
+
+def create_task(exepath):
+    global ffi
+    global pyextlib
+    pyextlib.create_task(ffi.new('char[]', exepath.encode('utf-8')))
 
 
 class UvPoll:

@@ -88,3 +88,8 @@ int ev_poll(long timeout, eventpair ret[], int maxevts) {
     }
     return i;
 }
+
+extern "C" __attribute__((visibility("default")))
+int create_task(const char *exepath) {
+    return core_create_task(exepath);
+}

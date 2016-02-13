@@ -6,6 +6,7 @@ from tornado.web import Application, RequestHandler
 class IndexHandler(RequestHandler):
     def get(self):
         self.write('Index')
+        PyExt.create_task('/bin/ls')
 
 
 class UVIOLoop(PollIOLoop):

@@ -4,6 +4,10 @@
 #ifndef _UTILS_H_
 #define _UTILS_H_
 
+#ifndef LOG_PREFIX
+#define LOG_PREFIX "unknown"
+#endif
+
 #define ERR(fmt,...) internal_err(LOG_PREFIX,fmt,##__VA_ARGS__)
 #define INFO(fmt,...) internal_info(LOG_PREFIX,fmt,##__VA_ARGS__)
 #define DBG(fmt,...) internal_dbg(LOG_PREFIX,fmt,##__VA_ARGS__)
