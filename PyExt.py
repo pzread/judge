@@ -1,0 +1,72 @@
+from cffi import FFI
+from tornado.ioloop import IOLoop
+
+
+def init():
+    global ffi
+    global pyextlib
+
+    ffi = FFI()
+    ffi.cdef('''
+        typedef struct {
+            int fd;
+            int events;
+        } eventpair;
+    ''')
+    ffi.cdef('''int init();''')
+    ffi.cdef('''int destroy();''')
+    ffi.cdef('''int ev_register(int fd, int events);''')
+    ffi.cdef('''int ev_unregister(int fd);''')
+    ffi.cdef('''int ev_modify(int fd, int events);''')
+    ffi.cdef('''int ev_poll(long timeout, eventpair ret[], int maxevts);''')
+    pyextlib = ffi.dlopen('lib/libpyext.so')
+    pyextlib.init()
+
+
+class UvPoll:
+    UV_READABLE = 1
+    UV_WRITEABLE = 2
+
+    def __init__(self):
+        global ffi
+        global pyextlib
+        self.ffi = ffi
+        self.pyextlib = pyextlib
+
+    def close(self):
+        raise NotImplemented()
+
+    def evt_to_uvevt(self, events):
+        uv_events = 0
+        if (events & IOLoop.READ) == IOLoop.READ:
+            uv_events |= UvPoll.UV_READABLE
+        if (events & IOLoop.WRITE) == IOLoop.WRITE:
+            uv_events |= UvPoll.UV_WRITEABLE
+        return uv_events
+
+    def register(self, fd, events):
+        self.pyextlib.ev_register(fd, self.evt_to_uvevt(events))
+
+    def unregister(self, fd):
+        self.pyextlib.ev_unregister(fd)
+
+    def modify(self, fd, events):
+        self.pyextlib.ev_modify(fd, self.evt_to_uvevt(events))
+
+    def poll(self, timeout, maxevts = 256):
+        evts = self.ffi.new('eventpair[]', maxevts)
+        num = self.pyextlib.ev_poll(int(timeout * 1000), evts, maxevts)
+        pairs = list()
+        for idx in range(num):
+            evt = evts[idx]
+            if evt.events < 0:
+                events = IOLoop.ERROR
+            else:
+                events = 0
+                if evt.events & UvPoll.UV_READABLE:
+                    events |= IOLoop.READ
+                if evt.events & UvPoll.UV_WRITEABLE:
+                    events |= IOLoop.WRITE
+            pairs.append((evt.fd, events))
+
+        return pairs
