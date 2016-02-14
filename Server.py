@@ -21,7 +21,7 @@ def main():
     app = Application([
         (r'/', IndexHandler),
     ])
-    app.listen(8000)
+    app.listen(6000)
     IOLoop.instance().start()
 
 
