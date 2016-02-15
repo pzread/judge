@@ -37,6 +37,8 @@ class Sandbox {
 	    SANDBOX_STATE_RUNNING,
 	    SANDBOX_STATE_STOP,
 	} state;
+	pid_t child_pid;
+
 	std::string exe_path;
 	std::vector<std::string> argv;
 	std::vector<std::string> envp;
@@ -48,12 +50,19 @@ class Sandbox {
 	std::vector<std::pair<unsigned int, unsigned int>> gid_map;
 	unsigned long timelimit;
 	unsigned long memlimit;
+
 	struct cgroup *cg;
 	struct cgroup_controller *memcg;
-	pid_t child_pid;
 	uv_timer_t force_uvtimer;
+	int memevt_fd;
+	uv_poll_t memevt_uvpoll;
 
     private:
+	static void memevt_uvpoll_callback(uv_poll_t *uvpoll,
+	    int status, int events);
+	static void force_uvtimer_callback(uv_timer_t *uvtimer);
+	static int sandbox_entry(void *data);
+
 	int install_limit() const;
 	int install_filter() const;
 	void update_state(siginfo_t *siginfo);
@@ -61,8 +70,6 @@ class Sandbox {
 
     public:
 	static void update_sandboxes(siginfo_t *siginfo);
-	static void force_uvtimer_callback(uv_timer_t *uvtimer);
-	static int sandbox_entry(void *data);
 
 	Sandbox(const std::string &_exe_path,
 	    const std::vector<std::string> &_argv,

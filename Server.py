@@ -19,7 +19,7 @@ def test():
         ['-o', '/tmp/a.out', '/tmp/test.cpp'],
         ['PATH=/usr/bin'],
         '/tmp', 'container/standard',
-        11000, 10000, 1200, 128 * 1024 * 1024)
+        11000, 10000, 1200, 10 * 1024 * 1024)
 
 
 def main():

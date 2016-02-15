@@ -45,5 +45,6 @@ unsigned long core_create_task(
     } catch(SandboxException &e) {
 	return -1;
     }
+
     return 0;
 }
