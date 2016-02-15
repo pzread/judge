@@ -8,6 +8,8 @@
 #include<cstring>
 #include<unordered_map>
 #include<unistd.h>
+#include<sched.h>
+#include<grp.h>
 #include<sys/wait.h>
 #include<sys/time.h>
 #include<sys/prctl.h>
@@ -24,51 +26,6 @@
 #include"utils.h"
 #include"sandbox.h"
 #include"core.h"
-
-/*
-int Sandbox::start() {
-
-    cgroup_set_value_uint64(memcg,"memory.swappiness",0);
-    cgroup_set_value_uint64(memcg,"memory.oom_control",1);
-    cgroup_set_value_uint64(memcg,"memory.limit_in_bytes",65536 * 1024);
-    cgroup_create_cgroup(cg,0);
-
-
-    if((child_pid = fork()) == 0) {
-	ptrace(PTRACE_TRACEME, 0, NULL, NULL);
-	kill(getpid(), SIGSTOP);
-
-	if(install_filter()) {
-	    printf("test\n");
-	    _exit(-1);
-	}
-
-	char path[PATH_MAX + 1];
-	strncpy(path, exe_path.c_str(), sizeof(path));
-	char *argv[] = {path, NULL};
-	char *envp[] = {NULL};
-	execve(argv[0], argv, envp);
-	_exit(0);
-    }
-    if(trace_loop()) {
-	ERR("Trace Error\n");
-    }
-    return 0;
-}
-
-int main(int argc, char *argv[]) {
-    cgroup_init();
-    auto cg = cgroup_new_cgroup("hypex");
-    auto memcg = cgroup_add_controller(cg, "memory");
-
-    Sandbox box(argv[1], memcg);
-    box.start();
-
-    cgroup_delete_cgroup(cg, 0);
-    cgroup_free(&cg);
-    return 0;
-}
-*/
 
 static uv_signal_t sigchld_uvsig;
 
@@ -125,25 +82,20 @@ Sandbox::~Sandbox() {
 }
 
 void Sandbox::start() {
+    char *child_stack = new char[4 * 1024 * 1024];
+
     INFO("Start task \"%s\".\n", exe_path.c_str());
-    if((child_pid = fork()) == 0) {
-	ptrace(PTRACE_TRACEME, 0, NULL, NULL);
-	kill(getpid(), SIGSTOP);
 
-	if(install_filter()) {
-	    _exit(0);
-	}
-
-	char path[PATH_MAX + 1];
-	strncpy(path, exe_path.c_str(), sizeof(path));
-	char *argv[] = {path, NULL};
-	char *envp[] = {NULL};
-	execve(path, argv, envp);
-	_exit(0);
+    if((child_pid = clone(sandbox_entry, child_stack + 4 * 1024 * 1024,
+	CLONE_NEWIPC | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWNS
+	| CLONE_NEWUSER | CLONE_NEWUTS | SIGCHLD, this)) == -1) {
+	throw SandboxException("Clone failed");
     }
 
     state = SANDBOX_STATE_PRERUN;
     run_map[child_pid] = this;
+
+    delete[] child_stack;
 }
 
 void Sandbox::update_state(siginfo_t *siginfo) {
@@ -156,6 +108,34 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    PTRACE_O_TRACESYSGOOD)) {
 	    throw SandboxException("Trace task failed.");
 	}
+
+	char path[PATH_MAX + 1];
+	FILE *f_uidmap;
+	FILE *f_gidmap;
+
+	snprintf(path, sizeof(path), "/proc/%d/uid_map", child_pid);
+	if((f_uidmap = fopen(path, "w")) == NULL) {
+	    throw SandboxException("Open uid_map failed.");
+	}
+	snprintf(path, sizeof(path), "/proc/%d/gid_map", child_pid);
+	if((f_gidmap = fopen(path, "w")) == NULL) {
+	    throw SandboxException("Open gid_map failed.");
+	}
+
+	for(auto uidpair : uid_map) {
+	    auto sdbx_uid = uidpair.first;
+	    auto parent_uid = uidpair.second;
+	    fprintf(f_uidmap, "%u %u 1\n", sdbx_uid, parent_uid);
+	}
+	for(auto gidpair : gid_map) {
+	    auto sdbx_gid = gidpair.first;
+	    auto parent_gid = gidpair.second;
+	    fprintf(f_gidmap, "%u %u 1\n", sdbx_gid, parent_gid);
+	}
+
+	fclose(f_uidmap);
+	fclose(f_gidmap);
+
 	kill(child_pid, SIGCONT);
 	ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 	state = SANDBOX_STATE_RUNNING;
@@ -297,4 +277,38 @@ void Sandbox::update_sandboxes(siginfo_t *siginfo) {
 	    sdbx->terminate();   
 	}
     }
+}
+
+int Sandbox::sandbox_entry(void *data) {
+    Sandbox *sdbx = (Sandbox*)data;
+
+    DBG("cloned\n");
+
+    ptrace(PTRACE_TRACEME, 0, NULL, NULL);
+    kill(getpid(), SIGSTOP);
+
+    if(setresuid(0, 0, 0)) {
+	_exit(-1);
+    }
+    if(setresgid(0, 0, 0)) {
+	_exit(-1);
+    }
+    if(setgroups(0, NULL)) {
+	_exit(-1);
+    }
+
+    if(chroot(sdbx->root_path.c_str())) {
+	_exit(-1);
+    }
+    if(sdbx->install_filter()) {
+	_exit(-1);
+    }
+
+    char path[PATH_MAX + 1];
+    strncpy(path, sdbx->exe_path.c_str(), sizeof(path));
+    char *argv[] = {path, "/etc/passwd", NULL};
+    char *envp[] = {NULL};
+    execve(path, argv, envp);
+    _exit(-1);
+    return 0;
 }

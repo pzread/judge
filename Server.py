@@ -15,7 +15,7 @@ class UVIOLoop(PollIOLoop):
 
 
 def test():
-    PyExt.create_task('/usr/bin/id', '/', 11000, 10000, 1200, 128 * 1024 * 1024)
+    PyExt.create_task('/usr/bin/touch', '/', 11000, 10000, 1200, 128 * 1024 * 1024)
 
 
 def main():

@@ -56,6 +56,7 @@ class Sandbox {
 
     public:
 	static void update_sandboxes(siginfo_t *siginfo);
+	static int sandbox_entry(void *data);
 
 	Sandbox(const std::string &_exe_path, const std::string &_root_path,
 	    unsigned int _uid, unsigned int _gid,
