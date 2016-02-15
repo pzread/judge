@@ -1,5 +1,6 @@
 #define LOG_PREFIX "core"
 
+#include<cassert>
 #include<string>
 #include<unordered_map>
 #include<queue>
@@ -14,7 +15,8 @@ uv_loop_t *core_uvloop = &uvloop_instance;
 
 static uv_timer_t defer_uvtimer;
 static std::queue<std::pair<func_core_defer_callback, void*>> defer_queue;
-static std::unordered_map<unsigned long, Sandbox*> task_map;
+static std::unordered_map<
+    unsigned long, std::pair<Sandbox*, func_core_task_callback>> task_map;
 
 static void defer_uvtimer_callback(uv_timer_t *uvtimer) {
     while(!defer_queue.empty()) {
@@ -48,7 +50,14 @@ int core_defer(func_core_defer_callback callback, void *data) {
 }
 
 static void sandbox_stop_callback(Sandbox *sdbx) {
-    task_map.erase(sdbx->id);
+    auto task_it = task_map.find(sdbx->id);
+    assert(task_it != task_map.end());
+
+    auto callback = task_it->second.second;
+    assert(callback != NULL);
+    callback(sdbx->id);
+
+    task_map.erase(task_it);
     delete(sdbx);
     INFO("Task finished.\n");
 }
@@ -66,15 +75,33 @@ unsigned long core_create_task(
     unsigned long timelimit,
     unsigned long memlimit
 ) {
-    auto sdbx = new Sandbox(exe_path, argv, envp, work_path, root_path,
-	uid, gid, uid_map, gid_map, timelimit, memlimit);
-    task_map[sdbx->id] = sdbx;
-
     try {
+	auto sdbx = new Sandbox(exe_path, argv, envp, work_path, root_path,
+	    uid, gid, uid_map, gid_map, timelimit, memlimit);
+	task_map.emplace(std::make_pair(sdbx->id,
+	    std::pair<Sandbox*, func_core_task_callback>(sdbx, NULL)));
+	return sdbx->id;
+    } catch(SandboxException &e) {
+	return 0;
+    }
+    return 0;
+}
+
+int core_start_task(unsigned long id, func_core_task_callback callback) {
+    auto task_it = task_map.find(id);
+
+    if(task_it == task_map.end()) {
+	return -1;
+    }
+    auto sdbx = task_it->second.first;
+    task_it->second.second = callback;
+
+    try{
 	sdbx->start(sandbox_stop_callback);
     } catch(SandboxException &e) {
+	task_map.erase(task_it);
 	delete sdbx;
+	return -1;
     }
-
     return 0;
 }

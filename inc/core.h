@@ -6,6 +6,7 @@
 #include<uv.h>
 
 typedef void (*func_core_defer_callback)(void *data);
+typedef void (*func_core_task_callback)(unsigned long id);
 
 extern uv_loop_t *core_uvloop;
 
@@ -23,5 +24,6 @@ unsigned long core_create_task(const std::string &exe_path,
     const std::vector<std::pair<unsigned int, unsigned int>> &gid_map,
     unsigned long timelimit,
     unsigned long memlimit);
+int core_start_task(unsigned long id, func_core_task_callback callback);
 
 #endif

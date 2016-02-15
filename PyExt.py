@@ -4,6 +4,7 @@ from tornado.ioloop import IOLoop
 
 ffi = None
 pyextlib = None
+task_callback = {}
 
 
 class UvPoll:
@@ -77,8 +78,17 @@ def init():
         char work_path[], char root_path[],
         unsigned int uid, unsigned int gid,
         unsigned long timelimit, unsigned long memlimit);''')
+    ffi.cdef('''int start_task(
+        unsigned long id,
+        void (*callback)(unsigned long id));''')
     pyextlib = ffi.dlopen('lib/libpyext.so')
     pyextlib.init()
+
+    global done_cb
+    @ffi.callback('void(unsigned long)')
+    def done_cb(task_id):
+        global task_callback
+        task_callback[task_id](task_id)
 
 
 def create_task(
@@ -107,5 +117,16 @@ def create_task(
     ffi_work_path = ffi.new('char[]', work_path.encode('utf-8'))
     ffi_root_path = ffi.new('char[]', root_path.encode('utf-8'))
 
-    pyextlib.create_task(ffi_exe_path, ffi_argv, ffi_envp,
+    task_id = pyextlib.create_task(ffi_exe_path, ffi_argv, ffi_envp,
         ffi_work_path,ffi_root_path, uid, gid, timelimit, memlimit)
+    if task_id == 0:
+        return None
+
+    return task_id
+
+def start_task(task_id, callback):
+    global done_cb
+    global task_callback
+
+    task_callback[task_id] = callback
+    return pyextlib.start_task(task_id, done_cb)

@@ -132,3 +132,8 @@ unsigned long create_task(
     return core_create_task(exe_path, vec_argv, vec_envp,
 	work_path, root_path, uid, gid, uid_map, gid_map, timelimit, memlimit);
 }
+
+extern "C" __attribute__((visibility("default")))
+int start_task(unsigned long id, void (*callback)(unsigned long id)) {
+    return core_start_task(id, callback);
+}
