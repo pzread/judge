@@ -72,17 +72,40 @@ def init():
     ffi.cdef('''int ev_unregister(int fd);''')
     ffi.cdef('''int ev_modify(int fd, int events);''')
     ffi.cdef('''int ev_poll(long timeout, eventpair ret[], int maxevts);''')
-    ffi.cdef('''unsigned long create_task(char exe_path[], char root_path[],
+    ffi.cdef('''unsigned long create_task(
+        char exe_path[], char *argv[], char *envp[],
+        char work_path[], char root_path[],
         unsigned int uid, unsigned int gid,
         unsigned long timelimit, unsigned long memlimit);''')
     pyextlib = ffi.dlopen('lib/libpyext.so')
     pyextlib.init()
 
 
-def create_task(exe_path, root_path, uid, gid, timelimit, memlimit):
+def create_task(
+    exe_path,
+    argv,
+    envp,
+    work_path,
+    root_path,
+    uid,
+    gid,
+    timelimit,
+    memlimit
+):
     global ffi
     global pyextlib
 
-    pyextlib.create_task(ffi.new('char[]', exe_path.encode('utf-8')),
-        ffi.new('char[]', root_path.encode('utf-8')), uid, gid,
-        timelimit, memlimit)
+    ffi_exe_path = ffi.new('char[]', exe_path.encode('utf-8'))
+    ffi_argv = []
+    for arg in argv:
+        ffi_argv.append(ffi.new('char[]', arg.encode('utf-8')))
+    ffi_argv.append(ffi.NULL)
+    ffi_envp = []
+    for env in envp:
+        ffi_envp.append(ffi.new('char[]', env.encode('utf-8')))
+    ffi_envp.append(ffi.NULL)
+    ffi_work_path = ffi.new('char[]', work_path.encode('utf-8'))
+    ffi_root_path = ffi.new('char[]', root_path.encode('utf-8'))
+
+    pyextlib.create_task(ffi_exe_path, ffi_argv, ffi_envp,
+        ffi_work_path,ffi_root_path, uid, gid, timelimit, memlimit)

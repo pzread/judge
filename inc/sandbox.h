@@ -38,6 +38,9 @@ class Sandbox {
 	    SANDBOX_STATE_STOP,
 	} state;
 	std::string exe_path;
+	std::vector<std::string> argv;
+	std::vector<std::string> envp;
+	std::string work_path;
 	std::string root_path;
 	unsigned int uid;
 	unsigned int gid;
@@ -61,11 +64,17 @@ class Sandbox {
 	static void force_uvtimer_callback(uv_timer_t *uvtimer);
 	static int sandbox_entry(void *data);
 
-	Sandbox(const std::string &_exe_path, const std::string &_root_path,
-	    unsigned int _uid, unsigned int _gid,
+	Sandbox(const std::string &_exe_path,
+	    const std::vector<std::string> &_argv,
+	    const std::vector<std::string> &_envp,
+	    const std::string &_work_path,
+	    const std::string &_root_path,
+	    unsigned int _uid,
+	    unsigned int _gid,
 	    const std::vector<std::pair<unsigned int, unsigned int>> &_uid_map,
 	    const std::vector<std::pair<unsigned int, unsigned int>> &_gid_map,
-	    unsigned long _timelimit, unsigned long _memlimit);
+	    unsigned long _timelimit,
+	    unsigned long _memlimit);
 	~Sandbox();
 	void start();
 	void stop();

@@ -97,14 +97,27 @@ int ev_poll(long timeout, eventpair ret[], int maxevts) {
 extern "C" __attribute__((visibility("default")))
 unsigned long create_task(
     const char *exe_path,
+    const char *argv[],
+    const char *envp[],
+    const char *work_path,
     const char *root_path,
     unsigned int uid,
     unsigned int gid,
     unsigned long timelimit,
     unsigned long memlimit
 ) {
+    int i;
+    std::vector<std::string> vec_argv;
+    std::vector<std::string> vec_envp;
     std::vector<std::pair<unsigned int, unsigned int>> uid_map;
     std::vector<std::pair<unsigned int, unsigned int>> gid_map;
+
+    for(i = 0;argv[i] != NULL;i++) {
+	vec_argv.emplace_back(argv[i]);
+    }
+    for(i = 0;envp[i] != NULL;i++) {
+	vec_envp.emplace_back(envp[i]);
+    }
 
     auto nobody_pwd = getpwnam("nobody");
     if(nobody_pwd == NULL) {
@@ -116,6 +129,6 @@ unsigned long create_task(
     uid_map.emplace_back(0, nobody_pwd->pw_uid);
     gid_map.emplace_back(0, nobody_pwd->pw_gid);
 
-    return core_create_task(exe_path, root_path, uid, gid, uid_map, gid_map,
-	timelimit, memlimit);
+    return core_create_task(exe_path, vec_argv, vec_envp,
+	work_path, root_path, uid, gid, uid_map, gid_map, timelimit, memlimit);
 }

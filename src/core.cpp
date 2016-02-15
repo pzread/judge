@@ -27,6 +27,9 @@ int core_poll() {
 
 unsigned long core_create_task(
     const std::string &exe_path,
+    const std::vector<std::string> &argv,
+    const std::vector<std::string> &envp,
+    const std::string &work_path,
     const std::string &root_path,
     unsigned int uid,
     unsigned int gid,
@@ -36,8 +39,8 @@ unsigned long core_create_task(
     unsigned long memlimit
 ) {
     try {
-	auto sdbx = new Sandbox(exe_path, root_path, uid,
-	    gid, uid_map, gid_map, timelimit, memlimit);
+	auto sdbx = new Sandbox(exe_path, argv, envp, work_path, root_path,
+	    uid, gid, uid_map, gid_map, timelimit, memlimit);
 	sdbx->start();
     } catch(SandboxException &e) {
 	return -1;

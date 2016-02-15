@@ -50,8 +50,10 @@ void sandbox_init() {
 unsigned long Sandbox::last_sandbox_id = 0;
 std::unordered_map<int, Sandbox*> Sandbox::run_map;
 
-Sandbox::Sandbox(
-    const std::string &_exe_path,
+Sandbox::Sandbox(const std::string &_exe_path,
+    const std::vector<std::string> &_argv,
+    const std::vector<std::string> &_envp,
+    const std::string &_work_path,
     const std::string &_root_path,
     unsigned int _uid,
     unsigned int _gid,
@@ -60,9 +62,10 @@ Sandbox::Sandbox(
     unsigned long _timelimit,
     unsigned long _memlimit
 ) :
-    id(++last_sandbox_id), state(SANDBOX_STATE_INIT), exe_path(_exe_path),
-    root_path(_root_path), uid(_uid), gid(_gid),
-    uid_map(_uid_map), gid_map(_gid_map),
+    id(++last_sandbox_id), state(SANDBOX_STATE_INIT),
+    exe_path(_exe_path), argv(_argv), envp(_envp),
+    work_path(_work_path), root_path(_root_path),
+    uid(_uid), gid(_gid), uid_map(_uid_map), gid_map(_gid_map),
     timelimit(_timelimit), memlimit(_memlimit)
 {
     char cg_name[NAME_MAX + 1];
@@ -322,8 +325,6 @@ void Sandbox::force_uvtimer_callback(uv_timer_t *uvtimer) {
 int Sandbox::sandbox_entry(void *data) {
     Sandbox *sdbx = (Sandbox*)data;
 
-    DBG("cloned\n");
-
     ptrace(PTRACE_TRACEME, 0, NULL, NULL);
     kill(getpid(), SIGSTOP);
 
@@ -339,6 +340,9 @@ int Sandbox::sandbox_entry(void *data) {
     if(chroot(sdbx->root_path.c_str())) {
 	_exit(-1);
     }
+    if(chdir(sdbx->work_path.c_str())) {
+	_exit(-1);
+    }
     if(sdbx->install_limit()) {
 	_exit(-1);
     }
@@ -346,11 +350,23 @@ int Sandbox::sandbox_entry(void *data) {
 	_exit(-1);
     }
 
-    char path[PATH_MAX + 1];
-    strncpy(path, sdbx->exe_path.c_str(), sizeof(path));
-    char *argv[] = {path, NULL};
-    char *envp[] = {NULL};
-    execve(path, argv, envp);
+    unsigned int i;
+    char **c_argv = new char*[sdbx->argv.size() + 2];
+    char **c_envp = new char*[sdbx->envp.size() + 1];
+    auto c_exe_path = strdup(sdbx->exe_path.c_str());
+
+    c_argv[0] = c_exe_path;
+    for(i = 0;i < sdbx->argv.size();i++) {
+	c_argv[i + 1] = strdup(sdbx->argv[i].c_str());
+    }
+    c_argv[sdbx->argv.size() + 1] = NULL;
+
+    for(i = 0;i < sdbx->envp.size();i++) {
+	c_envp[i] = strdup(sdbx->envp[i].c_str());
+    }
+    c_envp[sdbx->envp.size()] = NULL;
+
+    execve(c_exe_path, c_argv, c_envp);
     _exit(-1);
     return 0;
 }
