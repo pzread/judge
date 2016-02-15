@@ -15,11 +15,12 @@ class UVIOLoop(PollIOLoop):
 
 
 def test():
-    PyExt.create_task('/usr/bin/g++',
-        ['-o', '/tmp/a.out', '/tmp/test.cpp'],
-        ['PATH=/usr/bin'],
-        '/tmp', 'container/standard',
-        11000, 10000, 1200, 10 * 1024 * 1024)
+    for i in range(100):
+        PyExt.create_task('/usr/bin/g++',
+            ['-o', '/tmp/a.out', '/tmp/test.cpp'],
+            ['PATH=/usr/bin'],
+            '/tmp', 'container/standard',
+            11000, 10000, 1200, 10 * 1024 * 1024)
 
 
 def main():

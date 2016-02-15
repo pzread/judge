@@ -7,6 +7,7 @@
 #include<cerrno>
 #include<cstring>
 #include<unordered_map>
+#include<queue>
 #include<unistd.h>
 #include<sched.h>
 #include<grp.h>
@@ -63,11 +64,12 @@ Sandbox::Sandbox(const std::string &_exe_path,
     unsigned long _timelimit,
     unsigned long _memlimit
 ) :
-    id(++last_sandbox_id), state(SANDBOX_STATE_INIT),
+    state(SANDBOX_STATE_INIT),
     exe_path(_exe_path), argv(_argv), envp(_envp),
     work_path(_work_path), root_path(_root_path),
     uid(_uid), gid(_gid), uid_map(_uid_map), gid_map(_gid_map),
-    timelimit(_timelimit), memlimit(_memlimit)
+    timelimit(_timelimit), memlimit(_memlimit),
+    id(++last_sandbox_id)
 {
     char cg_name[NAME_MAX + 1];
     char *memcg_path;
@@ -150,8 +152,8 @@ Sandbox::~Sandbox() {
     cgroup_free(&cg);
 }
 
-void Sandbox::start() {
-    INFO("Start task \"%s\".\n", exe_path.c_str());
+void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
+    stop_callback = _stop_callback;
 
     char *child_stack = new char[4 * 1024 * 1024];
     if((child_pid = clone(sandbox_entry, child_stack + 4 * 1024 * 1024,
@@ -165,7 +167,7 @@ void Sandbox::start() {
     state = SANDBOX_STATE_PRERUN;
 }
 
-void Sandbox::stop() {
+void Sandbox::stop(bool exit_error) {
     if(state == SANDBOX_STATE_PRERUN) {
 	run_map.erase(child_pid);
     } else if(state == SANDBOX_STATE_RUNNING) {
@@ -173,19 +175,21 @@ void Sandbox::stop() {
 	uv_timer_stop(&force_uvtimer);
     }
     state = SANDBOX_STATE_STOP;
+
+    core_defer((func_core_defer_callback)stop_callback, this);
 }
 
 void Sandbox::update_state(siginfo_t *siginfo) {
     if(siginfo->si_code == CLD_EXITED) {
 	if(siginfo->si_status == 0) {
-	    statistic(false);
+	    stop(false);
 	} else {
-	    statistic(false);
+	    stop(false);
 	}
 	return;
     }
     if(siginfo->si_code == CLD_DUMPED || siginfo->si_code == CLD_KILLED) {
-	statistic(true);
+	stop(true);
 	return;
     }
 
@@ -291,11 +295,6 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    ptrace(PTRACE_CONT, child_pid, NULL, siginfo->si_status);
 	}
     }
-}
-
-void Sandbox::statistic(bool exit_error) {
-    INFO("Task finished.\n");
-    stop();
 }
 
 void Sandbox::terminate() {

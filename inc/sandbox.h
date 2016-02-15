@@ -5,12 +5,16 @@
 #include<string>
 #include<exception>
 #include<unordered_map>
+#include<queue>
 #include<unistd.h>
 #include<limits.h>
 #include<sys/signal.h>
 #include<libcgroup.h>
 
 #include"utils.h"
+
+class Sandbox;
+typedef void (*func_sandbox_stop_callback)(Sandbox *sdbx);
 
 class SandboxException : public std::exception {
     private:
@@ -30,7 +34,6 @@ class Sandbox {
 	static unsigned long last_sandbox_id;
 	static std::unordered_map<pid_t, Sandbox*> run_map;
 
-	unsigned long id;
 	enum {
 	    SANDBOX_STATE_INIT,
 	    SANDBOX_STATE_PRERUN,
@@ -38,6 +41,7 @@ class Sandbox {
 	    SANDBOX_STATE_STOP,
 	} state;
 	pid_t child_pid;
+	func_sandbox_stop_callback stop_callback;
 
 	std::string exe_path;
 	std::vector<std::string> argv;
@@ -57,6 +61,9 @@ class Sandbox {
 	int memevt_fd;
 	uv_poll_t memevt_uvpoll;
 
+    public:
+	unsigned long id;
+
     private:
 	static void memevt_uvpoll_callback(uv_poll_t *uvpoll,
 	    int status, int events);
@@ -66,8 +73,7 @@ class Sandbox {
 	int install_limit() const;
 	int install_filter() const;
 	void update_state(siginfo_t *siginfo);
-	void statistic(bool exit_error);
-	void stop();
+	void stop(bool exit_error);
 
     public:
 	static void update_sandboxes(siginfo_t *siginfo);
@@ -84,7 +90,7 @@ class Sandbox {
 	    unsigned long _timelimit,
 	    unsigned long _memlimit);
 	~Sandbox();
-	void start();
+	void start(func_sandbox_stop_callback _stop_callback);
 	void terminate();
 };
 

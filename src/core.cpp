@@ -1,6 +1,8 @@
 #define LOG_PREFIX "core"
 
 #include<string>
+#include<unordered_map>
+#include<queue>
 #include<uv.h>
 
 #include"utils.h"
@@ -10,19 +12,45 @@
 static uv_loop_t uvloop_instance;
 uv_loop_t *core_uvloop = &uvloop_instance;
 
+static uv_timer_t defer_uvtimer;
+static std::queue<std::pair<func_core_defer_callback, void*>> defer_queue;
+static std::unordered_map<unsigned long, Sandbox*> task_map;
+
+static void defer_uvtimer_callback(uv_timer_t *uvtimer) {
+    while(!defer_queue.empty()) {
+	auto defer = defer_queue.front();
+	defer_queue.pop();
+	defer.first(defer.second);
+    }
+}
+
 int core_init() {
     uv_loop_init(core_uvloop);   
+    uv_timer_init(core_uvloop, &defer_uvtimer);
     try {
 	sandbox_init();
     } catch(SandboxException &e) {
 	return -1;
     }
+    task_map.clear();
     INFO("Initialized.\n");
     return 0;
 }
 
 int core_poll() {
     return uv_run(core_uvloop, UV_RUN_ONCE);
+}
+
+int core_defer(func_core_defer_callback callback, void *data) {
+    defer_queue.emplace(callback, data);
+    uv_timer_start(&defer_uvtimer, defer_uvtimer_callback, 0, 0);
+    return 0;
+}
+
+static void sandbox_stop_callback(Sandbox *sdbx) {
+    task_map.erase(sdbx->id);
+    delete(sdbx);
+    INFO("Task finished.\n");
 }
 
 unsigned long core_create_task(
@@ -38,12 +66,14 @@ unsigned long core_create_task(
     unsigned long timelimit,
     unsigned long memlimit
 ) {
+    auto sdbx = new Sandbox(exe_path, argv, envp, work_path, root_path,
+	uid, gid, uid_map, gid_map, timelimit, memlimit);
+    task_map[sdbx->id] = sdbx;
+
     try {
-	auto sdbx = new Sandbox(exe_path, argv, envp, work_path, root_path,
-	    uid, gid, uid_map, gid_map, timelimit, memlimit);
-	sdbx->start();
+	sdbx->start(sandbox_stop_callback);
     } catch(SandboxException &e) {
-	return -1;
+	delete sdbx;
     }
 
     return 0;
