@@ -74,6 +74,9 @@ Sandbox::Sandbox(
     if((memcg = cgroup_add_controller(cg, "memory")) == NULL) {
 	throw SandboxException("Create memory cgroup failed.");
     }
+
+    uv_timer_init(core_uvloop, &force_uvtimer);
+    ((uv_handle_t*)&force_uvtimer)->data = this;
 }
 
 Sandbox::~Sandbox() {
@@ -82,23 +85,44 @@ Sandbox::~Sandbox() {
 }
 
 void Sandbox::start() {
-    char *child_stack = new char[4 * 1024 * 1024];
-
     INFO("Start task \"%s\".\n", exe_path.c_str());
 
+    char *child_stack = new char[4 * 1024 * 1024];
     if((child_pid = clone(sandbox_entry, child_stack + 4 * 1024 * 1024,
 	CLONE_NEWIPC | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWNS
 	| CLONE_NEWUSER | CLONE_NEWUTS | SIGCHLD, this)) == -1) {
 	throw SandboxException("Clone failed");
     }
-
-    state = SANDBOX_STATE_PRERUN;
-    run_map[child_pid] = this;
-
     delete[] child_stack;
+
+    run_map[child_pid] = this;
+    state = SANDBOX_STATE_PRERUN;
+}
+
+void Sandbox::stop() {
+    if(state == SANDBOX_STATE_PRERUN) {
+	run_map.erase(child_pid);
+    } else if(state == SANDBOX_STATE_RUNNING) {
+	run_map.erase(child_pid);
+	uv_timer_stop(&force_uvtimer);
+    }
+    state = SANDBOX_STATE_STOP;
 }
 
 void Sandbox::update_state(siginfo_t *siginfo) {
+    if(siginfo->si_code == CLD_EXITED) {
+	if(siginfo->si_status == 0) {
+	    statistic(false);
+	} else {
+	    statistic(false);
+	}
+	return;
+    }
+    if(siginfo->si_code == CLD_DUMPED || siginfo->si_code == CLD_KILLED) {
+	statistic(true);
+	return;
+    }
+
     if(state == SANDBOX_STATE_PRERUN) {
 	if(siginfo->si_code != CLD_TRAPPED || siginfo->si_status != SIGSTOP) {
 	    throw SandboxException("Trace task failed.");
@@ -136,19 +160,14 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	fclose(f_uidmap);
 	fclose(f_gidmap);
 
+	uv_timer_start(&force_uvtimer, force_uvtimer_callback,
+	    timelimit * 4 + 1000, 0);
+
 	kill(child_pid, SIGCONT);
 	ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 	state = SANDBOX_STATE_RUNNING;
 
     } else if(state == SANDBOX_STATE_RUNNING) {
-	if(siginfo->si_code == CLD_EXITED) {
-	    statistic(false);
-	    return;
-	}
-	if(siginfo->si_code == CLD_DUMPED || siginfo->si_code == CLD_KILLED) {
-	    statistic(true);
-	    return;
-	}
 	if(siginfo->si_code != CLD_TRAPPED) {
 	    throw SandboxException("Unexpected signal.");
 	    return;
@@ -197,12 +216,10 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	} else if(siginfo->si_status == SIGCONT
 	    || (siginfo->si_status & 0xF) == SIGTRAP) {
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
-
 	} else if(siginfo->si_status == SIGVTALRM
 	    || siginfo->si_status == SIGSTOP) {
 	    terminate();
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
-
 	} else {
 	    ptrace(PTRACE_CONT, child_pid, NULL, siginfo->si_status);
 	}
@@ -210,9 +227,8 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 }
 
 void Sandbox::statistic(bool exit_error) {
-    state = SANDBOX_STATE_STOP;
-    run_map.erase(child_pid);
     INFO("Task finished.\n");
+    stop();
 }
 
 void Sandbox::terminate() {
@@ -297,6 +313,10 @@ void Sandbox::update_sandboxes(siginfo_t *siginfo) {
 	    sdbx->terminate();   
 	}
     }
+}
+
+void Sandbox::force_uvtimer_callback(uv_timer_t *uvtimer) {
+    ((Sandbox*)((uv_handle_t*)uvtimer)->data)->terminate();
 }
 
 int Sandbox::sandbox_entry(void *data) {

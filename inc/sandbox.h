@@ -48,6 +48,7 @@ class Sandbox {
 	struct cgroup *cg;
 	struct cgroup_controller *memcg;
 	pid_t child_pid;
+	uv_timer_t force_uvtimer;
 
     private:
 	int install_limit() const;
@@ -57,6 +58,7 @@ class Sandbox {
 
     public:
 	static void update_sandboxes(siginfo_t *siginfo);
+	static void force_uvtimer_callback(uv_timer_t *uvtimer);
 	static int sandbox_entry(void *data);
 
 	Sandbox(const std::string &_exe_path, const std::string &_root_path,
@@ -66,6 +68,7 @@ class Sandbox {
 	    unsigned long _timelimit, unsigned long _memlimit);
 	~Sandbox();
 	void start();
+	void stop();
 	void terminate();
 };
 
