@@ -1,6 +1,7 @@
 #ifndef _SANDBOX_H_
 #define _SANDBOX_H_
 
+#include<vector>
 #include<string>
 #include<exception>
 #include<unordered_map>
@@ -36,7 +37,14 @@ class Sandbox {
 	    SANDBOX_STATE_RUNNING,
 	    SANDBOX_STATE_STOP,
 	} state;
-	std::string exepath;
+	std::string exe_path;
+	std::string root_path;
+	unsigned int uid;
+	unsigned int gid;
+	std::vector<std::pair<unsigned int, unsigned int>> uid_map;
+	std::vector<std::pair<unsigned int, unsigned int>> gid_map;
+	unsigned long timelimit;
+	unsigned long memlimit;
 	struct cgroup *cg;
 	struct cgroup_controller *memcg;
 	pid_t child_pid;
@@ -47,9 +55,13 @@ class Sandbox {
 	void statistic(bool exit_error);
 
     public:
-	static void update_states(siginfo_t *siginfo);
+	static void update_sandboxes(siginfo_t *siginfo);
 
-	Sandbox(const std::string &_exepath);
+	Sandbox(const std::string &_exe_path, const std::string &_root_path,
+	    unsigned int _uid, unsigned int _gid,
+	    const std::vector<std::pair<unsigned int, unsigned int>> &_uid_map,
+	    const std::vector<std::pair<unsigned int, unsigned int>> &_gid_map,
+	    unsigned long _timelimit, unsigned long _memlimit);
 	~Sandbox();
 	void start();
 	void terminate();

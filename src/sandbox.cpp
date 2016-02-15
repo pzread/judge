@@ -44,7 +44,7 @@ int Sandbox::start() {
 	}
 
 	char path[PATH_MAX + 1];
-	strncpy(path, exepath.c_str(), sizeof(path));
+	strncpy(path, exe_path.c_str(), sizeof(path));
 	char *argv[] = {path, NULL};
 	char *envp[] = {NULL};
 	execve(argv[0], argv, envp);
@@ -80,7 +80,7 @@ static void sigchld_callback(uv_signal_t *uvsig, int signo) {
 	if(siginfo.si_pid == 0) {
 	    break;
 	}
-	Sandbox::update_states(&siginfo);
+	Sandbox::update_sandboxes(&siginfo);
     }
 }
 
@@ -93,8 +93,20 @@ void sandbox_init() {
 unsigned long Sandbox::last_sandbox_id = 0;
 std::unordered_map<int, Sandbox*> Sandbox::run_map;
 
-Sandbox::Sandbox(const std::string &_exepath)
-    : id(++last_sandbox_id), state(SANDBOX_STATE_INIT), exepath(_exepath)
+Sandbox::Sandbox(
+    const std::string &_exe_path,
+    const std::string &_root_path,
+    unsigned int _uid,
+    unsigned int _gid,
+    const std::vector<std::pair<unsigned int, unsigned int>> &_uid_map,
+    const std::vector<std::pair<unsigned int, unsigned int>> &_gid_map,
+    unsigned long _timelimit,
+    unsigned long _memlimit
+) :
+    id(++last_sandbox_id), state(SANDBOX_STATE_INIT), exe_path(_exe_path),
+    root_path(_root_path), uid(_uid), gid(_gid),
+    uid_map(_uid_map), gid_map(_gid_map),
+    timelimit(_timelimit), memlimit(_memlimit)
 {
     char cg_name[NAME_MAX + 1];
 
@@ -113,7 +125,7 @@ Sandbox::~Sandbox() {
 }
 
 void Sandbox::start() {
-    INFO("Start task \"%s\".\n", exepath.c_str());
+    INFO("Start task \"%s\".\n", exe_path.c_str());
     if((child_pid = fork()) == 0) {
 	ptrace(PTRACE_TRACEME, 0, NULL, NULL);
 	kill(getpid(), SIGSTOP);
@@ -123,7 +135,7 @@ void Sandbox::start() {
 	}
 
 	char path[PATH_MAX + 1];
-	strncpy(path, exepath.c_str(), sizeof(path));
+	strncpy(path, exe_path.c_str(), sizeof(path));
 	char *argv[] = {path, NULL};
 	char *envp[] = {NULL};
 	execve(path, argv, envp);
@@ -132,18 +144,6 @@ void Sandbox::start() {
 
     state = SANDBOX_STATE_PRERUN;
     run_map[child_pid] = this;
-}
-
-void Sandbox::update_states(siginfo_t *siginfo) {
-    auto sdbx_it = run_map.find(siginfo->si_pid);
-    if(sdbx_it != run_map.end()) {
-	auto sdbx = sdbx_it->second;
-	try {
-	    sdbx->update_state(siginfo);
-	} catch(SandboxException &e) {
-	    sdbx->terminate();   
-	}
-    }
 }
 
 void Sandbox::update_state(siginfo_t *siginfo) {
@@ -285,4 +285,16 @@ int Sandbox::install_filter() {
 	return -1;
     }
     return prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0);
+}
+
+void Sandbox::update_sandboxes(siginfo_t *siginfo) {
+    auto sdbx_it = run_map.find(siginfo->si_pid);
+    if(sdbx_it != run_map.end()) {
+	auto sdbx = sdbx_it->second;
+	try {
+	    sdbx->update_state(siginfo);
+	} catch(SandboxException &e) {
+	    sdbx->terminate();   
+	}
+    }
 }

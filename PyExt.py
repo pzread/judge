@@ -2,31 +2,8 @@ from cffi import FFI
 from tornado.ioloop import IOLoop
 
 
-def init():
-    global ffi
-    global pyextlib
-
-    ffi = FFI()
-    ffi.cdef('''
-        typedef struct {
-            int fd;
-            int events;
-        } eventpair;
-    ''')
-    ffi.cdef('''int init();''')
-    ffi.cdef('''int ev_register(int fd, int events);''')
-    ffi.cdef('''int ev_unregister(int fd);''')
-    ffi.cdef('''int ev_modify(int fd, int events);''')
-    ffi.cdef('''int ev_poll(long timeout, eventpair ret[], int maxevts);''')
-    ffi.cdef('''int create_task(char exepath[]);''')
-    pyextlib = ffi.dlopen('lib/libpyext.so')
-    pyextlib.init()
-
-
-def create_task(exepath):
-    global ffi
-    global pyextlib
-    pyextlib.create_task(ffi.new('char[]', exepath.encode('utf-8')))
+ffi = None
+pyextlib = None
 
 
 class UvPoll:
@@ -36,6 +13,7 @@ class UvPoll:
     def __init__(self):
         global ffi
         global pyextlib
+
         self.ffi = ffi
         self.pyextlib = pyextlib
 
@@ -76,3 +54,35 @@ class UvPoll:
             pairs.append((evt.fd, events))
 
         return pairs
+
+
+def init():
+    global ffi
+    global pyextlib
+
+    ffi = FFI()
+    ffi.cdef('''
+        typedef struct {
+            int fd;
+            int events;
+        } eventpair;
+    ''')
+    ffi.cdef('''int init();''')
+    ffi.cdef('''int ev_register(int fd, int events);''')
+    ffi.cdef('''int ev_unregister(int fd);''')
+    ffi.cdef('''int ev_modify(int fd, int events);''')
+    ffi.cdef('''int ev_poll(long timeout, eventpair ret[], int maxevts);''')
+    ffi.cdef('''unsigned long create_task(char exe_path[], char root_path[],
+        unsigned int uid, unsigned int gid,
+        unsigned long timelimit, unsigned long memlimit);''')
+    pyextlib = ffi.dlopen('lib/libpyext.so')
+    pyextlib.init()
+
+
+def create_task(exe_path, root_path, uid, gid, timelimit, memlimit):
+    global ffi
+    global pyextlib
+
+    pyextlib.create_task(ffi.new('char[]', exe_path.encode('utf-8')),
+        ffi.new('char[]', root_path.encode('utf-8')), uid, gid,
+        timelimit, memlimit)

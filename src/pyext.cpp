@@ -1,9 +1,14 @@
+#define LOG_PREFIX "pyext"
+
 #include<cassert>
 #include<csignal>
 #include<queue>
+#include<vector>
 #include<unordered_map>
+#include<pwd.h>
 #include<uv.h>
 
+#include"utils.h"
 #include"core.h"
 
 struct eventpair {
@@ -90,6 +95,27 @@ int ev_poll(long timeout, eventpair ret[], int maxevts) {
 }
 
 extern "C" __attribute__((visibility("default")))
-int create_task(const char *exepath) {
-    return core_create_task(exepath);
+unsigned long create_task(
+    const char *exe_path,
+    const char *root_path,
+    unsigned int uid,
+    unsigned int gid,
+    unsigned long timelimit,
+    unsigned long memlimit
+) {
+    std::vector<std::pair<unsigned int, unsigned int>> uid_map;
+    std::vector<std::pair<unsigned int, unsigned int>> gid_map;
+
+    auto nobody_pwd = getpwnam("nobody");
+    if(nobody_pwd == NULL) {
+	ERR("Can't get passwd of nobody\n");
+	return 0;
+    }
+    uid_map.emplace_back(uid, uid);
+    gid_map.emplace_back(gid, gid);
+    uid_map.emplace_back(0, nobody_pwd->pw_uid);
+    gid_map.emplace_back(0, nobody_pwd->pw_gid);
+
+    return core_create_task(exe_path, root_path, uid, gid, uid_map, gid_map,
+	timelimit, memlimit);
 }

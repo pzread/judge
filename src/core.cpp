@@ -25,9 +25,19 @@ int core_poll() {
     return uv_run(core_uvloop, UV_RUN_ONCE);
 }
 
-int core_create_task(const std::string &exepath) {
+unsigned long core_create_task(
+    const std::string &exe_path,
+    const std::string &root_path,
+    unsigned int uid,
+    unsigned int gid,
+    const std::vector<std::pair<unsigned int, unsigned int>> &uid_map,
+    const std::vector<std::pair<unsigned int, unsigned int>> &gid_map,
+    unsigned long timelimit,
+    unsigned long memlimit
+) {
     try {
-	auto sdbx = new Sandbox(exepath);
+	auto sdbx = new Sandbox(exe_path, root_path, uid,
+	    gid, uid_map, gid_map, timelimit, memlimit);
 	sdbx->start();
     } catch(SandboxException &e) {
 	return -1;
