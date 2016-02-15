@@ -67,6 +67,7 @@ class Sandbox {
 	int install_filter() const;
 	void update_state(siginfo_t *siginfo);
 	void statistic(bool exit_error);
+	void stop();
 
     public:
 	static void update_sandboxes(siginfo_t *siginfo);
@@ -84,7 +85,6 @@ class Sandbox {
 	    unsigned long _memlimit);
 	~Sandbox();
 	void start();
-	void stop();
 	void terminate();
 };
 

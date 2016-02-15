@@ -71,67 +71,83 @@ Sandbox::Sandbox(const std::string &_exe_path,
 {
     char cg_name[NAME_MAX + 1];
     char *memcg_path;
-    char memuse_path[PATH_MAX + 1];
-    int memuse_fd;
+    char oom_path[PATH_MAX + 1];
+    int oom_fd;
     char memevt_param[256];
 
     cg = NULL;
     memcg = NULL;
+    oom_fd = -1;
     memevt_fd = -1;
 
-    snprintf(cg_name, sizeof(cg_name), "hypex_%lu", id);
-    if((cg = cgroup_new_cgroup(cg_name)) == NULL) {
-	throw SandboxException("Create cgroup failed.");
-    }
-    if((memcg = cgroup_add_controller(cg, "memory")) == NULL) {
-	throw SandboxException("Create memory cgroup failed.");
-    }
-    cgroup_delete_cgroup(cg, 1);
-    if(cgroup_create_cgroup(cg, 0)) {
-	throw SandboxException("Add cgroup failed.");
-    }
+    try{ 
+	snprintf(cg_name, sizeof(cg_name), "hypex_%lu", id);
+	if((cg = cgroup_new_cgroup(cg_name)) == NULL) {
+	    throw SandboxException("Create cgroup failed.");
+	}
+	if((memcg = cgroup_add_controller(cg, "memory")) == NULL) {
+	    throw SandboxException("Create memory cgroup failed.");
+	}
+	cgroup_delete_cgroup(cg, 1);
+	if(cgroup_create_cgroup(cg, 0)) {
+	    throw SandboxException("Add cgroup failed.");
+	}
 
-    if(cgroup_get_subsys_mount_point("memory", &memcg_path)) {
-	throw SandboxException("Set memory event failed.");
-    }
-    snprintf(memuse_path, sizeof(memuse_path),
-	"%s/hypex_%lu/memory.usage_in_bytes", memcg_path, id);
-    free(memcg_path);
-    if((memuse_fd = open(memuse_path, O_RDONLY | O_CLOEXEC)) < 0) {
-	throw SandboxException("Set memory event failed.");
-    }
-    if((memevt_fd = eventfd(0, EFD_CLOEXEC)) < 0) {
-	throw SandboxException("Set memory event failed.");
-    }
-    //uv_poll_init(core_uvloop, &memevt_uvpoll, memevt_fd);
-    //((uv_handle_t*)&memevt_uvpoll)->data = this;
-    //uv_poll_start(&memevt_uvpoll, UV_READABLE, memevt_uvpoll_callback);
-    snprintf(memevt_param, sizeof(memevt_param), "%d %d %lu",
-	memevt_fd, memuse_fd, memlimit / 2);
+	if((memevt_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) < 0) {
+	    throw SandboxException("Set memory event failed.");
+	}
+	uv_poll_init(core_uvloop, &memevt_uvpoll, memevt_fd);
+	((uv_handle_t*)&memevt_uvpoll)->data = this;
+	uv_poll_start(&memevt_uvpoll, UV_READABLE, memevt_uvpoll_callback);
 
-    DBG("%s\n", memevt_param);
-    cgroup_set_value_uint64(memcg, "memory.swappiness", 0);
-    cgroup_set_value_uint64(memcg, "memory.oom_control", 1);
-    cgroup_set_value_uint64(memcg, "memory.limit_in_bytes", memlimit);
-    cgroup_set_value_string(memcg, "cgroup.event_control", memevt_param);
+	if(cgroup_get_subsys_mount_point("memory", &memcg_path)) {
+	    throw SandboxException("Set memory event failed.");
+	}
+	snprintf(oom_path, sizeof(oom_path),
+	    "%s/hypex_%lu/memory.oom_control", memcg_path, id);
+	free(memcg_path);
+	if((oom_fd = open(oom_path, O_RDONLY | O_CLOEXEC)) < 0) {
+	    throw SandboxException("Set memory event failed.");
+	}
+	snprintf(memevt_param, sizeof(memevt_param), "%d %d",
+	    memevt_fd, oom_fd);
 
-    if(cgroup_modify_cgroup(cg)) {
-	throw SandboxException("Set cgroup failed.");
+	cgroup_set_value_uint64(memcg, "memory.swappiness", 0);
+	cgroup_set_value_uint64(memcg, "memory.oom_control", 1);
+	cgroup_set_value_uint64(memcg, "memory.limit_in_bytes",
+	    memlimit + 4096);
+	cgroup_set_value_string(memcg, "cgroup.event_control", memevt_param);
+
+	if(cgroup_modify_cgroup(cg)) {
+	    throw SandboxException("Set cgroup failed.");
+	}
+	close(oom_fd);
+	oom_fd = -1;
+
+	uv_timer_init(core_uvloop, &force_uvtimer);
+	((uv_handle_t*)&force_uvtimer)->data = this;
+
+    } catch(SandboxException &e) {
+	if(oom_fd >= 0) {
+	    close(oom_fd);
+	}
+	if(memevt_fd >= 0) {
+	    uv_poll_stop(&memevt_uvpoll);
+	    close(memevt_fd);
+	}
+        if(cg != NULL) {
+	    cgroup_delete_cgroup(cg, 1);
+	    cgroup_free(&cg);
+	}
+	throw e;
     }
-
-    uv_timer_init(core_uvloop, &force_uvtimer);
-    ((uv_handle_t*)&force_uvtimer)->data = this;
 }
 
 Sandbox::~Sandbox() {
-    if(memevt_fd >= 0) {
-	uv_poll_stop(&memevt_uvpoll);
-	close(memevt_fd);
-    }
-    if(cg != NULL) {
-	cgroup_delete_cgroup(cg, 1);
-	cgroup_free(&cg);
-    }
+    uv_poll_stop(&memevt_uvpoll);
+    close(memevt_fd);
+    cgroup_delete_cgroup(cg, 1);
+    cgroup_free(&cg);
 }
 
 void Sandbox::start() {
@@ -150,10 +166,6 @@ void Sandbox::start() {
 }
 
 void Sandbox::stop() {
-    unsigned long x;
-    DBG("%d\n", read(memevt_fd, &x, sizeof(x)));
-    DBG("%lu\n", x);
-
     if(state == SANDBOX_STATE_PRERUN) {
 	run_map.erase(child_pid);
     } else if(state == SANDBOX_STATE_RUNNING) {
@@ -376,7 +388,12 @@ void Sandbox::memevt_uvpoll_callback(
     int events
 ) {
     Sandbox *sdbx = (Sandbox*)((uv_handle_t*)uvpoll)->data;
-    DBG("test\n");
+    unsigned long count;
+
+    if(read(sdbx->memevt_fd, &count, sizeof(count)) != sizeof(count)) {
+	return;
+    }
+    sdbx->terminate();
 }
 
 void Sandbox::force_uvtimer_callback(uv_timer_t *uvtimer) {
