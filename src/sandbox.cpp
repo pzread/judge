@@ -194,8 +194,17 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    }
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 
-	} else {
+	} else if(siginfo->si_status == SIGCONT
+	    || (siginfo->si_status & 0xF) == SIGTRAP) {
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+
+	} else if(siginfo->si_status == SIGVTALRM
+	    || siginfo->si_status == SIGSTOP) {
+	    terminate();
+	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+
+	} else {
+	    ptrace(PTRACE_CONT, child_pid, NULL, siginfo->si_status);
 	}
     }
 }
@@ -210,7 +219,18 @@ void Sandbox::terminate() {
     kill(child_pid, SIGKILL);
 }
 
-int Sandbox::install_filter() {
+int Sandbox::install_limit() const {
+    struct itimerval time;
+
+    time.it_interval.tv_sec = 0;
+    time.it_interval.tv_usec = 0;
+    time.it_value.tv_sec = (timelimit + 1) / 1000;
+    time.it_value.tv_usec = ((timelimit + 1) % 1000) * 1000;
+    signal(SIGVTALRM, SIG_DFL);
+    return setitimer(ITIMER_VIRTUAL, &time, NULL);
+}
+
+int Sandbox::install_filter() const {
     unsigned int upper_nr_limit = 0x40000000 - 1;
     struct sock_filter filter[] = {
 	//get arch
@@ -287,17 +307,19 @@ int Sandbox::sandbox_entry(void *data) {
     ptrace(PTRACE_TRACEME, 0, NULL, NULL);
     kill(getpid(), SIGSTOP);
 
-    if(setresuid(0, 0, 0)) {
-	_exit(-1);
-    }
-    if(setresgid(0, 0, 0)) {
-	_exit(-1);
-    }
     if(setgroups(0, NULL)) {
 	_exit(-1);
     }
-
+    if(setresgid(sdbx->gid, sdbx->gid, sdbx->gid)) {
+	_exit(-1);
+    }
+    if(setresuid(sdbx->uid, sdbx->uid, sdbx->uid)) {
+	_exit(-1);
+    }
     if(chroot(sdbx->root_path.c_str())) {
+	_exit(-1);
+    }
+    if(sdbx->install_limit()) {
 	_exit(-1);
     }
     if(sdbx->install_filter()) {
@@ -306,7 +328,7 @@ int Sandbox::sandbox_entry(void *data) {
 
     char path[PATH_MAX + 1];
     strncpy(path, sdbx->exe_path.c_str(), sizeof(path));
-    char *argv[] = {path, "/etc/passwd", NULL};
+    char *argv[] = {path, NULL};
     char *envp[] = {NULL};
     execve(path, argv, envp);
     _exit(-1);

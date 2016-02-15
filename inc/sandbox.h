@@ -50,7 +50,8 @@ class Sandbox {
 	pid_t child_pid;
 
     private:
-	int install_filter();
+	int install_limit() const;
+	int install_filter() const;
 	void update_state(siginfo_t *siginfo);
 	void statistic(bool exit_error);
 
