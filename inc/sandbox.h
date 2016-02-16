@@ -79,8 +79,6 @@ class Sandbox {
 	unsigned long memlimit;
 	sandbox_restrict_level restrict_level;
 
-	SandboxStat stat;
-
 	struct cgroup *cg;
 	struct cgroup_controller *memcg;
 	uv_timer_t force_uvtimer;
@@ -90,6 +88,7 @@ class Sandbox {
 
     public:
 	unsigned long id;
+	SandboxStat stat;
 
     private:
 	static void memevt_uvpoll_callback(uv_poll_t *uvpoll,

@@ -35,12 +35,12 @@ class StdChal:
 
         if self.comp_typ == 'g++':
             ret = yield self.comp_gxx()
-            print('OK')
+            print(ret)
             
     @concurrent.return_future
     def comp_gxx(self, callback):
-        def _done_cb(task_id):
-            callback()
+        def _done_cb(task_id, stat):
+            callback(stat['detect_error'])
 
         compile_path = self.chal_path + '/compile'
         os.mkdir(compile_path, mode=0o750)

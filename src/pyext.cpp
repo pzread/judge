@@ -16,6 +16,13 @@ struct eventpair {
     int fd;
     int events;
 };
+struct taskstat {
+    unsigned long utime;
+    unsigned long stime;
+    unsigned long peakmem;
+    int detect_error;
+};
+typedef void (*func_pyext_stop_callback)(unsigned long id, taskstat stat);
 
 static uv_timer_t poll_uvtimer;
 static std::unordered_map<int, uv_poll_t*> poll_map;
@@ -136,7 +143,22 @@ unsigned long create_task(
 	(sandbox_restrict_level)restrict_level);
 }
 
+static void stop_task_callback(
+    unsigned long id,
+    const SandboxStat &stat,
+    void *data
+) {
+    taskstat tstat;
+    auto callback = (func_pyext_stop_callback)data;
+
+    tstat.utime = stat.utime;
+    tstat.stime = stat.stime;
+    tstat.peakmem = stat.peakmem;
+    tstat.detect_error = (int)stat.detect_error;
+    callback(id, tstat);
+}
+
 extern "C" __attribute__((visibility("default")))
-int start_task(unsigned long id, void (*callback)(unsigned long id)) {
-    return core_start_task(id, callback);
+int start_task(unsigned long id, func_pyext_stop_callback callback) {
+    return core_start_task(id, stop_task_callback, (void*)callback);
 }

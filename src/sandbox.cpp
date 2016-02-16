@@ -255,7 +255,9 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	}
 
 	if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_EXIT<<8))) {
-	    read_stat(&stat.utime, &stat.stime, &stat.peakmem);
+	    if(read_stat(&stat.utime, &stat.stime, &stat.peakmem)) {
+		throw SandboxException("Read stat failed.");
+	    }
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 
 	}else if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_SECCOMP<<8))) {
@@ -428,6 +430,7 @@ void Sandbox::update_sandboxes(siginfo_t *siginfo) {
 	try {
 	    sdbx->update_state(siginfo);
 	} catch(SandboxException &e) {
+	    sdbx->stat.detect_error = SandboxStat::SANDBOX_STAT_INTERNALERR;
 	    sdbx->terminate();   
 	}
     }

@@ -56,7 +56,7 @@ static void sandbox_stop_callback(Sandbox *sdbx) {
 
     auto &task = task_it->second;
     assert(task.callback != NULL);
-    task.callback(sdbx->id);
+    task.callback(sdbx->id, sdbx->stat, task.data);
 
     task_map.erase(task_it);
     delete(task.sdbx);
@@ -80,7 +80,7 @@ unsigned long core_create_task(
     try {
 	auto sdbx = new Sandbox(exe_path, argv, envp, work_path, root_path,
 	    uid, gid, uid_map, gid_map, timelimit, memlimit, restrict_level);
-	task_map.emplace(std::make_pair(sdbx->id, Task(sdbx, NULL)));
+	task_map.emplace(std::make_pair(sdbx->id, Task(sdbx, NULL, NULL)));
 	return sdbx->id;
     } catch(SandboxException &e) {
 	return 0;
@@ -88,7 +88,11 @@ unsigned long core_create_task(
     return 0;
 }
 
-int core_start_task(unsigned long id, func_core_task_callback callback) {
+int core_start_task(
+    unsigned long id,
+    func_core_task_callback callback,
+    void *data
+) {
     auto task_it = task_map.find(id);
 
     if(task_it == task_map.end()) {
@@ -96,6 +100,7 @@ int core_start_task(unsigned long id, func_core_task_callback callback) {
     }
     auto &task = task_it->second;
     task.callback = callback;
+    task.data = data;
 
     try{
 	task.sdbx->start(sandbox_stop_callback);

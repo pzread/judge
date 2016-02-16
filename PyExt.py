@@ -5,6 +5,13 @@ from tornado.ioloop import IOLoop
 RESTRICT_LEVEL_LOW = 0
 RESTRICT_LEVEL_HIGH = 1
 
+DETECT_NONE = 0,
+DETECT_OOM = 1,
+DETECT_TIMEOUT = 2,
+DETECT_FORCETIMEOUT = 3,
+DETECT_EXITERR = 4,
+DETECT_INTERNALERR = 5,
+
 
 ffi = None
 pyextlib = None
@@ -74,6 +81,15 @@ def init():
             int events;
         } eventpair;
     ''')
+    ffi.cdef('''
+        struct taskstat {
+            unsigned long utime;
+            unsigned long stime;
+            unsigned long peakmem;
+            int detect_error;
+        };
+    ''')
+
     ffi.cdef('''int init();''')
     ffi.cdef('''int ev_register(int fd, int events);''')
     ffi.cdef('''int ev_unregister(int fd);''')
@@ -87,14 +103,19 @@ def init():
         int restrict_level);''')
     ffi.cdef('''int start_task(
         unsigned long id,
-        void (*callback)(unsigned long id));''')
+        void (*callback)(unsigned long id, struct taskstat stat));''')
     pyextlib = ffi.dlopen('lib/libpyext.so')
     pyextlib.init()
 
-    @ffi.callback('void(unsigned long)')
-    def task_stop_cb(task_id):
+    @ffi.callback('void(unsigned long, struct taskstat)')
+    def task_stop_cb(task_id, stat):
         global task_map
-        task_map[task_id](task_id)
+        task_map[task_id](task_id,{
+            'utime': stat.utime,
+            'stime': stat.stime,
+            'peakmem': stat.peakmem,
+            'detect_error': stat.detect_error,
+        })
         del task_map[task_id]
 
 
