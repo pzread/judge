@@ -40,7 +40,6 @@ class StdChal:
     @concurrent.return_future
     def comp_gxx(self, callback):
         def _done_cb(task_id):
-            print('Done')
             callback()
 
         compile_path = self.chal_path + '/compile'

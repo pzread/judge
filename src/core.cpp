@@ -28,12 +28,14 @@ static void defer_uvtimer_callback(uv_timer_t *uvtimer) {
 int core_init() {
     uv_loop_init(core_uvloop);   
     uv_timer_init(core_uvloop, &defer_uvtimer);
+    task_map.clear();
+
     try {
 	sandbox_init();
     } catch(SandboxException &e) {
 	return -1;
     }
-    task_map.clear();
+
     INFO("Initialized.\n");
     return 0;
 }

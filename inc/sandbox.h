@@ -10,14 +10,15 @@
 #include<limits.h>
 #include<sys/signal.h>
 #include<libcgroup.h>
+#include<uv.h>
 
 #include"utils.h"
 
+class Sandbox;
 enum sandbox_restrict_level {
     SANDBOX_RESTRICT_LOW = 0,
     SANDBOX_RESTRICT_HIGH = 1,
 };
-class Sandbox;
 typedef void (*func_sandbox_stop_callback)(Sandbox *sdbx);
 
 class SandboxException : public std::exception {
@@ -31,6 +32,24 @@ class SandboxException : public std::exception {
 	virtual const char* what() const throw() {
 	    return what_arg.c_str();
 	}
+};
+
+class SandboxStat {
+    public:
+	unsigned long utime;
+	unsigned long stime;
+	unsigned long peakmem;
+	enum {
+	    SANDBOX_STAT_NONE = 0,
+	    SANDBOX_STAT_OOM = 1,
+	    SANDBOX_STAT_TIMEOUT = 2,
+	    SANDBOX_STAT_FORCETIMEOUT = 3,
+	    SANDBOX_STAT_EXITERR = 4,
+	    SANDBOX_STAT_INTERNALERR = 5,
+	} detect_error;
+
+	SandboxStat() : utime(0), stime(0), peakmem(0),
+	    detect_error(SANDBOX_STAT_NONE) {}
 };
 
 class Sandbox {
@@ -60,11 +79,14 @@ class Sandbox {
 	unsigned long memlimit;
 	sandbox_restrict_level restrict_level;
 
+	SandboxStat stat;
+
 	struct cgroup *cg;
 	struct cgroup_controller *memcg;
 	uv_timer_t force_uvtimer;
-	int memevt_fd;
 	uv_poll_t memevt_uvpoll;
+	int memevt_fd;
+
 
     public:
 	unsigned long id;
@@ -77,6 +99,8 @@ class Sandbox {
 
 	int install_limit() const;
 	int install_filter() const;
+	int read_stat(unsigned long *utime, unsigned long *stime,
+	    unsigned long *peakmem);
 	void update_state(siginfo_t *siginfo);
 	void stop(bool exit_error);
 

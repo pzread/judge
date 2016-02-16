@@ -158,6 +158,7 @@ Sandbox::~Sandbox() {
 
 void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
     stop_callback = _stop_callback;
+    stat.detect_error = SandboxStat::SANDBOX_STAT_NONE;
 
     char *child_stack = new char[4 * 1024 * 1024];
     if((child_pid = clone(sandbox_entry, child_stack + 4 * 1024 * 1024,
@@ -174,11 +175,16 @@ void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
 void Sandbox::stop(bool exit_error) {
     if(state == SANDBOX_STATE_PRERUN) {
 	run_map.erase(child_pid);
+	stat.detect_error = SandboxStat::SANDBOX_STAT_INTERNALERR;
     } else if(state == SANDBOX_STATE_RUNNING) {
 	run_map.erase(child_pid);
 	uv_timer_stop(&force_uvtimer);
     }
     state = SANDBOX_STATE_STOP;
+
+    if(stat.detect_error == SandboxStat::SANDBOX_STAT_NONE && exit_error) {
+	stat.detect_error = SandboxStat::SANDBOX_STAT_EXITERR;
+    }
 
     core_defer((func_core_defer_callback)stop_callback, this);
 }
@@ -248,7 +254,11 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    return;
 	}
 
-	if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_SECCOMP << 8))) {
+	if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_EXIT<<8))) {
+	    read_stat(&stat.utime, &stat.stime, &stat.peakmem);
+	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+
+	}else if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_SECCOMP<<8))) {
 	    unsigned long nr;
 
 	    if(ptrace(PTRACE_GETEVENTMSG, child_pid ,NULL, &nr)) {
@@ -288,11 +298,10 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    }
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 
-	} else if(siginfo->si_status == SIGCONT
-	    || (siginfo->si_status & 0xF) == SIGTRAP) {
+	} else if((siginfo->si_status & 0xF) == SIGTRAP) {
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
-	} else if(siginfo->si_status == SIGVTALRM
-	    || siginfo->si_status == SIGSTOP) {
+	} else if(siginfo->si_status == SIGVTALRM) {
+	    stat.detect_error = SandboxStat::SANDBOX_STAT_TIMEOUT;
 	    terminate();
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 	} else {
@@ -373,6 +382,45 @@ int Sandbox::install_filter() const {
     return prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog, 0, 0);
 }
 
+int Sandbox::read_stat(
+    unsigned long *utime,
+    unsigned long *stime,
+    unsigned long *peakmem
+) {
+    char stat_path[PATH_MAX + 1];
+    FILE *stat_f;
+    char *memcg_path;
+    char memuse_path[PATH_MAX + 1];
+    FILE *memuse_f;
+
+    snprintf(stat_path, sizeof(stat_path), "/proc/%d/stat", child_pid);
+    if((stat_f = fopen(stat_path, "r")) == NULL) {
+	return -1;
+    }
+    fscanf(stat_f,
+	"%*d (%*[^)]) %*c %*d %*d %*d %*d %*d %*u %*d %*d %*d " \
+	"%*d %lu %lu %*d %*d %*d %*d %*d %*d %*d %*d %*d " \
+	"%*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d " \
+	"%*d %*d %*d %*u %*d %*d %*d %*d %*d %*d %*d %*d "
+	"%*d %*d %*d", utime, stime);
+    fclose(stat_f);
+
+    *utime = (*utime * 1000UL) / sysconf(_SC_CLK_TCK);
+    *stime = (*stime * 1000UL) / sysconf(_SC_CLK_TCK);
+
+    if(cgroup_get_subsys_mount_point("memory", &memcg_path)) {
+	return -1;
+    }
+    snprintf(memuse_path, sizeof(memuse_path),
+	"%s/hypex_%lu/memory.max_usage_in_bytes", memcg_path, id);
+    free(memcg_path);
+    memuse_f = fopen(memuse_path, "r");
+    fscanf(memuse_f, "%lu", peakmem);
+    fclose(memuse_f);
+
+    return 0;
+}
+
 void Sandbox::update_sandboxes(siginfo_t *siginfo) {
     auto sdbx_it = run_map.find(siginfo->si_pid);
     if(sdbx_it != run_map.end()) {
@@ -396,11 +444,14 @@ void Sandbox::memevt_uvpoll_callback(
     if(read(sdbx->memevt_fd, &count, sizeof(count)) != sizeof(count)) {
 	return;
     }
+    sdbx->stat.detect_error = SandboxStat::SANDBOX_STAT_OOM;
     sdbx->terminate();
 }
 
 void Sandbox::force_uvtimer_callback(uv_timer_t *uvtimer) {
-    ((Sandbox*)((uv_handle_t*)uvtimer)->data)->terminate();
+    auto sdbx = (Sandbox*)((uv_handle_t*)uvtimer)->data;
+    sdbx->stat.detect_error = SandboxStat::SANDBOX_STAT_FORCETIMEOUT;
+    sdbx->terminate();
 }
 
 int Sandbox::sandbox_entry(void *data) {
