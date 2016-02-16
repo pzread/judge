@@ -109,6 +109,9 @@ unsigned long create_task(
     const char *exe_path,
     const char *argv[],
     const char *envp[],
+    int stdin_fd,
+    int stdout_fd,
+    int stderr_fd,
     const char *work_path,
     const char *root_path,
     unsigned int uid,
@@ -129,6 +132,9 @@ unsigned long create_task(
 	vec_envp.emplace_back(envp[i]);
     }
 
+    config.stdin_fd = stdin_fd;
+    config.stdout_fd = stdout_fd;
+    config.stderr_fd = stderr_fd;
     config.work_path = work_path;
     config.root_path = root_path;
     config.uid = uid;

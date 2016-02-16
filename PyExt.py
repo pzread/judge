@@ -97,6 +97,7 @@ def init():
     ffi.cdef('''int ev_poll(long timeout, eventpair ret[], int maxevts);''')
     ffi.cdef('''unsigned long create_task(
         char exe_path[], char *argv[], char *envp[],
+        int stdin_fd, int stdout_fd, int stderr_fd,
         char work_path[], char root_path[],
         unsigned int uid, unsigned int gid,
         unsigned long timelimit, unsigned long memlimit,
@@ -127,6 +128,9 @@ def create_task(
     exe_path,
     argv,
     envp,
+    stdin_fd,
+    stdout_fd,
+    stderr_fd,
     work_path,
     root_path,
     uid,
@@ -153,8 +157,8 @@ def create_task(
     ffi_root_path = ffi.new('char[]', root_path.encode('utf-8'))
 
     task_id = pyextlib.create_task(ffi_exe_path, ffi_argv, ffi_envp,
-        ffi_work_path, ffi_root_path, uid, gid, timelimit, memlimit,
-        restrict_level)
+        stdin_fd, stdout_fd, stderr_fd, ffi_work_path, ffi_root_path,
+        uid, gid, timelimit, memlimit, restrict_level)
 
     if task_id == 0:
         return None

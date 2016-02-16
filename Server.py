@@ -20,7 +20,7 @@ def test():
     chal = StdChal(573, 'lib/test.cpp', 'g++', [
         {
             'in':'lib/in.txt',
-            'ans':'lib/ans.txt',
+            'ans':'lib/out.txt',
             'timelimit': 1500,
             'memlimit': 128 * 1024 * 1024,
         },

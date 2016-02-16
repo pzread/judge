@@ -36,6 +36,9 @@ class SandboxException : public std::exception {
 
 class SandboxConfig {
     public:
+	int stdin_fd;
+	int stdout_fd;
+	int stderr_fd;
 	std::string work_path;
 	std::string root_path;
 	unsigned int uid;

@@ -408,7 +408,9 @@ int Sandbox::read_stat(
     snprintf(memuse_path, sizeof(memuse_path),
 	"%s/hypex_%lu/memory.max_usage_in_bytes", memcg_path, id);
     free(memcg_path);
-    memuse_f = fopen(memuse_path, "r");
+    if((memuse_f = fopen(memuse_path, "r")) == NULL) {
+	return -1;
+    }
     fscanf(memuse_f, "%lu", peakmem);
     fclose(memuse_f);
 
@@ -478,6 +480,10 @@ int Sandbox::sandbox_entry(void *data) {
 	    _exit(-1);
 	}
     }
+
+    dup2(sdbx->config.stdin_fd, 0);
+    dup2(sdbx->config.stdout_fd, 1);
+    dup2(sdbx->config.stderr_fd, 2);
 
     unsigned int i;
     char **c_argv = new char*[sdbx->argv.size() + 2];

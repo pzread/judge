@@ -10,6 +10,7 @@ import Config
 class StdChal:
     last_compile_uid = Config.CONTAINER_STANDARD_UID_BASE
     last_judge_uid = Config.CONTAINER_RESTRICT_UID_BASE
+    null_fd = None
 
     def init():
         try:
@@ -17,6 +18,8 @@ class StdChal:
         except FileNotFoundError:
             pass
         os.mkdir('container/standard/home', mode=0o711)
+
+        StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
 
     def __init__(self, chal_id, code_path, comp_typ, test_list):
         self.chal_id = chal_id
@@ -45,10 +48,11 @@ class StdChal:
 
         for test in self.test_list:
             print(test)
-            ret = yield self.judge_diff(test['timelimit'], test['memlimit'])
+            ret = yield self.judge_diff(test['in'], test['ans'],
+                test['timelimit'], test['memlimit'])
             print(ret)
 
-        #shutil.rmtree(self.chal_path)
+        shutil.rmtree(self.chal_path)
             
     @concurrent.return_future
     def comp_gxx(self, callback):
@@ -70,6 +74,7 @@ class StdChal:
                 'PATH=/usr/bin',
                 'TMPDIR=/home/%d/compile'%self.chal_id
             ],
+            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
             '/home/%d/compile'%self.chal_id, 'container/standard',
             self.compile_uid, self.compile_gid, 1200, 256 * 1024 * 1024,
             PyExt.RESTRICT_LEVEL_LOW)
@@ -77,9 +82,78 @@ class StdChal:
         PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
-    def judge_diff(self, timelimit, memlimit, callback):
+    def judge_diff(self, in_path, ans_path, timelimit, memlimit, callback):
+        infile = open(in_path, 'rb')
+        ansfile = open(ans_path, 'rb')
+        inpipe_fd = os.pipe2(os.O_CLOEXEC)
+        outpipe_fd = os.pipe2(os.O_CLOEXEC)
+        result_stat = None
+        result_pass = None
+
         def _done_cb(task_id, stat):
-            callback((stat['utime'], stat['peakmem'], stat['detect_error']))
+            nonlocal result_stat
+            nonlocal result_pass
+
+            result_stat = (stat['utime'], stat['peakmem'], stat['detect_error'])
+            if result_pass is not None:
+                callback((result_pass, result_stat))
+
+        def _diff_in(fd, events):
+            nonlocal inpipe_fd
+            nonlocal infile
+
+            end_flag = False
+            if events & IOLoop.WRITE:
+                while True:
+                    data = infile.read(65536)
+                    if len(data) == 0:
+                        end_flag = True
+                        break
+                    try:
+                        ret = os.write(inpipe_fd[1], data) 
+                    except BlockingIOError:
+                        break
+                    if ret == 0:
+                        end_flag = True
+                        break
+                    if ret < len(data):
+                        infile.seek(-(len(data) - ret), 1)
+
+            if (events & IOLoop.ERROR) or end_flag:
+                IOLoop.instance().remove_handler(fd)
+                os.close(inpipe_fd[1])
+                infile.close()
+
+        def _diff_out(fd, events):
+            nonlocal outpipe_fd
+            nonlocal ansfile
+            nonlocal result_stat
+            nonlocal result_pass
+
+            end_flag = False
+            if events & IOLoop.READ:
+                while True:
+                    try:
+                        data = os.read(outpipe_fd[0], 65536)
+                    except BlockingIOError:
+                        break
+                    ansdata = ansfile.read(len(data))
+                    if data != ansdata:
+                        result_pass = False
+                        end_flag = True
+                        break
+                    if len(ansdata) == 0:
+                        result_pass = True
+                        end_flag = True
+                        break
+
+            if (events & IOLoop.ERROR) or end_flag:
+                IOLoop.instance().remove_handler(fd)
+                os.close(outpipe_fd[0])
+                ansfile.close()
+
+                if result_stat is not None:
+                    callback((result_pass, result_stat))
 
         StdChal.last_judge_uid += 1
         judge_uid = StdChal.last_judge_uid
@@ -97,8 +171,16 @@ class StdChal:
                 self.chal_id, judge_uid),
             [],
             [],
+            inpipe_fd[0], outpipe_fd[1], outpipe_fd[1],
             '/home/%d/run_%d'%(self.chal_id, judge_uid), 'container/standard',
             judge_uid, judge_gid, timelimit, memlimit,
             PyExt.RESTRICT_LEVEL_HIGH)
 
         PyExt.start_task(task_id, _done_cb)
+
+        os.close(inpipe_fd[0])
+        os.close(outpipe_fd[1])
+        IOLoop.instance().add_handler(inpipe_fd[1], _diff_in,
+            IOLoop.WRITE | IOLoop.ERROR)
+        IOLoop.instance().add_handler(outpipe_fd[0], _diff_out,
+            IOLoop.READ | IOLoop.ERROR)
