@@ -17,7 +17,14 @@ class UVIOLoop(PollIOLoop):
 
 @gen.coroutine
 def test():
-    chal = StdChal(573, 'lib/test.cpp', 'g++', [])
+    chal = StdChal(573, 'lib/test.cpp', 'g++', [
+        {
+            'in':'lib/in.txt',
+            'ans':'lib/ans.txt',
+            'timelimit': 1500,
+            'memlimit': 128 * 1024 * 1024,
+        },
+    ])
     ret = yield chal.start()
     print(ret)
 

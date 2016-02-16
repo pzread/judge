@@ -18,11 +18,11 @@ class StdChal:
             pass
         os.mkdir('container/standard/home', mode=0o711)
 
-    def __init__(self, chal_id, code_path, comp_typ, param_list):
+    def __init__(self, chal_id, code_path, comp_typ, test_list):
         self.chal_id = chal_id
         self.code_path = code_path
         self.comp_typ = comp_typ
-        self.param_list = param_list
+        self.test_list = test_list
         self.chal_path = None
 
         StdChal.last_compile_uid += 1
@@ -43,7 +43,12 @@ class StdChal:
                 'status': 5,        
             }
 
-        shutil.rmtree(self.chal_path)
+        for test in self.test_list:
+            print(test)
+            ret = yield self.judge_diff(test['timelimit'], test['memlimit'])
+            print(ret)
+
+        #shutil.rmtree(self.chal_path)
             
     @concurrent.return_future
     def comp_gxx(self, callback):
@@ -59,7 +64,7 @@ class StdChal:
             [
                 '-O2',
                 '-o', './a.out',
-                './ai.cpp'
+                './a.cpp'
             ],
             [
                 'PATH=/usr/bin',
@@ -68,5 +73,32 @@ class StdChal:
             '/home/%d/compile'%self.chal_id, 'container/standard',
             self.compile_uid, self.compile_gid, 1200, 256 * 1024 * 1024,
             PyExt.RESTRICT_LEVEL_LOW)
+
+        PyExt.start_task(task_id, _done_cb)
+
+    @concurrent.return_future
+    def judge_diff(self, timelimit, memlimit, callback):
+        def _done_cb(task_id, stat):
+            callback((stat['utime'], stat['peakmem'], stat['detect_error']))
+
+        StdChal.last_judge_uid += 1
+        judge_uid = StdChal.last_judge_uid
+        judge_gid = judge_uid
+
+        judge_path = self.chal_path + '/run_%d'%judge_uid
+        os.mkdir(judge_path, mode=0o750)
+        os.chown(judge_path, judge_uid, judge_gid)
+        shutil.copyfile(self.chal_path + '/compile/a.out',
+            judge_path + '/a.out')
+        os.chown(judge_path + '/a.out', judge_uid, judge_gid)
+        os.chmod(judge_path + '/a.out', 0o700)
+
+        task_id = PyExt.create_task('/home/%d/run_%d/a.out'%(
+                self.chal_id, judge_uid),
+            [],
+            [],
+            '/home/%d/run_%d'%(self.chal_id, judge_uid), 'container/standard',
+            judge_uid, judge_gid, timelimit, memlimit,
+            PyExt.RESTRICT_LEVEL_HIGH)
 
         PyExt.start_task(task_id, _done_cb)
