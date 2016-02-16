@@ -4,11 +4,20 @@
 #include<vector>
 #include<string>
 #include<uv.h>
+#include"sandbox.h"
 
 typedef void (*func_core_defer_callback)(void *data);
 typedef void (*func_core_task_callback)(unsigned long id);
 
-extern uv_loop_t *core_uvloop;
+class Task {
+    public:
+	unsigned long id;
+	Sandbox *sdbx;
+	func_core_task_callback callback;
+
+	Task(Sandbox *_sdbx, func_core_task_callback _callback)
+	    : id(_sdbx->id), sdbx(_sdbx), callback(_callback) {}
+};
 
 int core_init();
 int core_poll();
@@ -25,5 +34,7 @@ unsigned long core_create_task(const std::string &exe_path,
     unsigned long timelimit,
     unsigned long memlimit);
 int core_start_task(unsigned long id, func_core_task_callback callback);
+
+extern uv_loop_t *core_uvloop;
 
 #endif

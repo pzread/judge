@@ -89,6 +89,7 @@ def init():
     def done_cb(task_id):
         global task_callback
         task_callback[task_id](task_id)
+        del task_callback[task_id]
 
 
 def create_task(

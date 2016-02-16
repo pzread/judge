@@ -76,6 +76,7 @@ Sandbox::Sandbox(const std::string &_exe_path,
     char oom_path[PATH_MAX + 1];
     int oom_fd;
     char memevt_param[256];
+    uv_handle_t *uvhandle;
 
     cg = NULL;
     memcg = NULL;
@@ -99,7 +100,8 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	    throw SandboxException("Set memory event failed.");
 	}
 	uv_poll_init(core_uvloop, &memevt_uvpoll, memevt_fd);
-	((uv_handle_t*)&memevt_uvpoll)->data = this;
+	uvhandle = (uv_handle_t*)&memevt_uvpoll;
+	uvhandle->data = this;
 	uv_poll_start(&memevt_uvpoll, UV_READABLE, memevt_uvpoll_callback);
 
 	if(cgroup_get_subsys_mount_point("memory", &memcg_path)) {
@@ -127,7 +129,8 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	oom_fd = -1;
 
 	uv_timer_init(core_uvloop, &force_uvtimer);
-	((uv_handle_t*)&force_uvtimer)->data = this;
+	uvhandle = (uv_handle_t*)&force_uvtimer;
+	uvhandle->data = this;
 
     } catch(SandboxException &e) {
 	if(oom_fd >= 0) {
