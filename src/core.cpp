@@ -52,7 +52,7 @@ static void sandbox_stop_callback(Sandbox *sdbx) {
     auto task_it = task_map.find(sdbx->id);
     assert(task_it != task_map.end());
 
-    auto task = task_it->second;
+    auto &task = task_it->second;
     assert(task.callback != NULL);
     task.callback(sdbx->id);
 
@@ -91,7 +91,7 @@ int core_start_task(unsigned long id, func_core_task_callback callback) {
     if(task_it == task_map.end()) {
 	return -1;
     }
-    auto task = task_it->second;
+    auto &task = task_it->second;
     task.callback = callback;
 
     try{

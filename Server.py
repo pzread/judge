@@ -15,12 +15,17 @@ class UVIOLoop(PollIOLoop):
 
 
 def test():
+    chal = StdChal(573, 'lib/test.cpp', 'g++', [])
+    chal.start()
+
+    '''
     task_id = PyExt.create_task('/usr/bin/g++',
         ['-O3', '-o', '/tmp/a.out', '/tmp/test.cpp'],
         ['PATH=/usr/bin'],
         '/tmp', 'container/standard',
         11000, 10000, 1200, 10 * 1024 * 1024)
     PyExt.start_task(task_id, lambda x: x)
+    '''
 
 
 def main():

@@ -15,8 +15,37 @@ class StdChal:
             pass
         os.mkdir('container/standard/home', mode=0o711)
 
-    def __init__(self, chal_id, code_path):
+    def __init__(self, chal_id, code_path, comp_typ, param_list):
         self.chal_id = chal_id
+        self.code_path = code_path
+        self.comp_typ = comp_typ
+        self.param_list = param_list
+        self.chal_path = None
+
         StdChal.last_compile_uid += 1
         self.compile_uid = StdChal.last_compile_uid
-        self.compile_gid = Config.CONTAINER_STANDARD_GID
+        self.compile_gid = self.compile_uid
+
+    def start(self):
+        self.chal_path = 'container/standard/home/%d'%self.chal_id
+        os.mkdir(self.chal_path, mode=0o711)
+
+        if self.comp_typ == 'g++':
+            self.comp_gxx()
+            
+    def comp_gxx(self):
+        compile_path = self.chal_path + '/compile'
+        os.mkdir(compile_path, mode=0o750)
+        os.chown(compile_path, self.compile_uid, self.compile_gid)
+        os.link(self.code_path, compile_path + '/a.cpp')
+
+        task_id = PyExt.create_task('/usr/bin/g++',
+            [
+                '-O2',
+                '-o', './a.out',
+                './a.cpp'
+            ],
+            ['PATH=/usr/bin', 'TMPDIR=/home/%d/compile'%self.chal_id],
+            '/home/%d/compile'%self.chal_id, 'container/standard',
+            self.compile_uid, self.compile_gid, 1200, 256 * 1024 * 1024)
+        PyExt.start_task(task_id, lambda x: x)
