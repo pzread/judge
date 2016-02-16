@@ -12,5 +12,5 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -Wall -Wextra -Wno-unused-parameter -fvisibility=hidden")
 
 include_directories(pyext inc)
-add_library(pyext SHARED src/pyext.cpp src/core.cpp src/utils.cpp src/sandbox.cpp src/taskstats.cpp)
+add_library(pyext SHARED src/pyext.cpp src/core.cpp src/utils.cpp src/sandbox.cpp)
 target_link_libraries(pyext uv cgroup)

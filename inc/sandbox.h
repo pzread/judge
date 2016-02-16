@@ -34,6 +34,18 @@ class SandboxException : public std::exception {
 	}
 };
 
+class SandboxConfig {
+    public:
+	std::string work_path;
+	std::string root_path;
+	unsigned int uid;
+	unsigned int gid;
+	std::vector<std::pair<unsigned int, unsigned int>> uid_map;
+	std::vector<std::pair<unsigned int, unsigned int>> gid_map;
+	unsigned long timelimit;
+	unsigned long memlimit;
+	sandbox_restrict_level restrict_level;
+};
 class SandboxStat {
     public:
 	unsigned long utime;
@@ -69,15 +81,7 @@ class Sandbox {
 	std::string exe_path;
 	std::vector<std::string> argv;
 	std::vector<std::string> envp;
-	std::string work_path;
-	std::string root_path;
-	unsigned int uid;
-	unsigned int gid;
-	std::vector<std::pair<unsigned int, unsigned int>> uid_map;
-	std::vector<std::pair<unsigned int, unsigned int>> gid_map;
-	unsigned long timelimit;
-	unsigned long memlimit;
-	sandbox_restrict_level restrict_level;
+	SandboxConfig config;
 
 	struct cgroup *cg;
 	struct cgroup_controller *memcg;
@@ -105,19 +109,10 @@ class Sandbox {
 
     public:
 	static void update_sandboxes(siginfo_t *siginfo);
-
 	Sandbox(const std::string &_exe_path,
 	    const std::vector<std::string> &_argv,
 	    const std::vector<std::string> &_envp,
-	    const std::string &_work_path,
-	    const std::string &_root_path,
-	    unsigned int _uid,
-	    unsigned int _gid,
-	    const std::vector<std::pair<unsigned int, unsigned int>> &_uid_map,
-	    const std::vector<std::pair<unsigned int, unsigned int>> &_gid_map,
-	    unsigned long _timelimit,
-	    unsigned long _memlimit,
-	    sandbox_restrict_level _restrict_level);
+	    const SandboxConfig &_config);
 	~Sandbox();
 	void start(func_sandbox_stop_callback _stop_callback);
 	void terminate();

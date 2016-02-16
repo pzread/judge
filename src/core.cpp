@@ -60,6 +60,7 @@ static void sandbox_stop_callback(Sandbox *sdbx) {
 
     task_map.erase(task_it);
     delete(task.sdbx);
+
     INFO("Task finished.\n");
 }
 
@@ -67,19 +68,10 @@ unsigned long core_create_task(
     const std::string &exe_path,
     const std::vector<std::string> &argv,
     const std::vector<std::string> &envp,
-    const std::string &work_path,
-    const std::string &root_path,
-    unsigned int uid,
-    unsigned int gid,
-    const std::vector<std::pair<unsigned int, unsigned int>> &uid_map,
-    const std::vector<std::pair<unsigned int, unsigned int>> &gid_map,
-    unsigned long timelimit,
-    unsigned long memlimit,
-    sandbox_restrict_level restrict_level
+    const SandboxConfig &config
 ) {
     try {
-	auto sdbx = new Sandbox(exe_path, argv, envp, work_path, root_path,
-	    uid, gid, uid_map, gid_map, timelimit, memlimit, restrict_level);
+	auto sdbx = new Sandbox(exe_path, argv, envp, config);
 	task_map.emplace(std::make_pair(sdbx->id, Task(sdbx, NULL, NULL)));
 	return sdbx->id;
     } catch(SandboxException &e) {

@@ -36,6 +36,8 @@ class StdChal:
         if self.comp_typ == 'g++':
             ret = yield self.comp_gxx()
             print(ret)
+
+        shutil.rmtree(self.chal_path)
             
     @concurrent.return_future
     def comp_gxx(self, callback):

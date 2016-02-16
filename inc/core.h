@@ -27,15 +27,7 @@ int core_defer(func_core_defer_callback callback, void *data);
 unsigned long core_create_task(const std::string &exe_path,
     const std::vector<std::string> &argv,
     const std::vector<std::string> &envp,
-    const std::string &work_path,
-    const std::string &root_path,
-    unsigned int uid,
-    unsigned int gid,
-    const std::vector<std::pair<unsigned int, unsigned int>> &uid_map,
-    const std::vector<std::pair<unsigned int, unsigned int>> &gid_map,
-    unsigned long timelimit,
-    unsigned long memlimit,
-    sandbox_restrict_level restrict_level);
+    const SandboxConfig &config);
 int core_start_task(unsigned long id,
     func_core_task_callback callback, void *data);
 

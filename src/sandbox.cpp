@@ -55,21 +55,13 @@ std::unordered_map<int, Sandbox*> Sandbox::run_map;
 Sandbox::Sandbox(const std::string &_exe_path,
     const std::vector<std::string> &_argv,
     const std::vector<std::string> &_envp,
-    const std::string &_work_path,
-    const std::string &_root_path,
-    unsigned int _uid,
-    unsigned int _gid,
-    const std::vector<std::pair<unsigned int, unsigned int>> &_uid_map,
-    const std::vector<std::pair<unsigned int, unsigned int>> &_gid_map,
-    unsigned long _timelimit,
-    unsigned long _memlimit,
-    sandbox_restrict_level _restrict_level
+    const SandboxConfig &_config
 ) :
     state(SANDBOX_STATE_INIT),
-    exe_path(_exe_path), argv(_argv), envp(_envp),
-    work_path(_work_path), root_path(_root_path),
-    uid(_uid), gid(_gid), uid_map(_uid_map), gid_map(_gid_map),
-    timelimit(_timelimit), memlimit(_memlimit), restrict_level(_restrict_level),
+    exe_path(_exe_path),
+    argv(_argv),
+    envp(_envp),
+    config(_config),
     id(++last_sandbox_id)
 {
     char cg_name[NAME_MAX + 1];
@@ -120,7 +112,7 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	cgroup_set_value_uint64(memcg, "memory.swappiness", 0);
 	cgroup_set_value_uint64(memcg, "memory.oom_control", 1);
 	cgroup_set_value_uint64(memcg, "memory.limit_in_bytes",
-	    memlimit + 4096);
+	    config.memlimit + 4096);
 	cgroup_set_value_string(memcg, "cgroup.event_control", memevt_param);
 
 	if(cgroup_modify_cgroup(cg)) {
@@ -225,12 +217,12 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	if((f_gidmap = fopen(path, "w")) == NULL) {
 	    throw SandboxException("Open gid_map failed.");
 	}
-	for(auto uidpair : uid_map) {
+	for(auto uidpair : config.uid_map) {
 	    auto sdbx_uid = uidpair.first;
 	    auto parent_uid = uidpair.second;
 	    fprintf(f_uidmap, "%u %u 1\n", sdbx_uid, parent_uid);
 	}
-	for(auto gidpair : gid_map) {
+	for(auto gidpair : config.gid_map) {
 	    auto sdbx_gid = gidpair.first;
 	    auto parent_gid = gidpair.second;
 	    fprintf(f_gidmap, "%u %u 1\n", sdbx_gid, parent_gid);
@@ -239,7 +231,7 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	fclose(f_gidmap);
 
 	uv_timer_start(&force_uvtimer, force_uvtimer_callback,
-	    timelimit * 4 + 1000, 0);
+	    config.timelimit * 4 + 1000, 0);
 	if(cgroup_attach_task_pid(cg, child_pid)) {
 	    throw SandboxException("Move to cgroup failed.");
 	}
@@ -321,8 +313,8 @@ int Sandbox::install_limit() const {
 
     time.it_interval.tv_sec = 0;
     time.it_interval.tv_usec = 0;
-    time.it_value.tv_sec = (timelimit + 1) / 1000;
-    time.it_value.tv_usec = ((timelimit + 1) % 1000) * 1000;
+    time.it_value.tv_sec = (config.timelimit + 1) / 1000;
+    time.it_value.tv_usec = ((config.timelimit + 1) % 1000) * 1000;
     signal(SIGVTALRM, SIG_DFL);
     return setitimer(ITIMER_VIRTUAL, &time, NULL);
 }
@@ -466,19 +458,19 @@ int Sandbox::sandbox_entry(void *data) {
     if(setgroups(0, NULL)) {
 	_exit(-1);
     }
-    if(setresgid(sdbx->gid, sdbx->gid, sdbx->gid)) {
+    if(setresgid(sdbx->config.gid, sdbx->config.gid, sdbx->config.gid)) {
 	_exit(-1);
     }
-    if(setresuid(sdbx->uid, sdbx->uid, sdbx->uid)) {
+    if(setresuid(sdbx->config.uid, sdbx->config.uid, sdbx->config.uid)) {
 	_exit(-1);
     }
-    if(chroot(sdbx->root_path.c_str())) {
+    if(chroot(sdbx->config.root_path.c_str())) {
 	_exit(-1);
     }
-    if(chdir(sdbx->work_path.c_str())) {
+    if(chdir(sdbx->config.work_path.c_str())) {
 	_exit(-1);
     }
-    if(sdbx->restrict_level != SANDBOX_RESTRICT_LOW) {
+    if(sdbx->config.restrict_level != SANDBOX_RESTRICT_LOW) {
 	if(sdbx->install_limit()) {
 	    _exit(-1);
 	}

@@ -118,8 +118,7 @@ unsigned long create_task(
     int i;
     std::vector<std::string> vec_argv;
     std::vector<std::string> vec_envp;
-    std::vector<std::pair<unsigned int, unsigned int>> uid_map;
-    std::vector<std::pair<unsigned int, unsigned int>> gid_map;
+    SandboxConfig config;
 
     for(i = 0;argv[i] != NULL;i++) {
 	vec_argv.emplace_back(argv[i]);
@@ -128,19 +127,25 @@ unsigned long create_task(
 	vec_envp.emplace_back(envp[i]);
     }
 
+    config.work_path = work_path;
+    config.root_path = root_path;
+    config.uid = uid;
+    config.gid = gid;
+    config.timelimit = timelimit;
+    config.memlimit = memlimit;
+    config.restrict_level = (sandbox_restrict_level)restrict_level;
+
     auto nobody_pwd = getpwnam("nobody");
     if(nobody_pwd == NULL) {
 	ERR("Can't get passwd of nobody\n");
 	return 0;
     }
-    uid_map.emplace_back(uid, uid);
-    gid_map.emplace_back(gid, gid);
-    uid_map.emplace_back(0, nobody_pwd->pw_uid);
-    gid_map.emplace_back(0, nobody_pwd->pw_gid);
+    config.uid_map.emplace_back(uid, uid);
+    config.gid_map.emplace_back(gid, gid);
+    config.uid_map.emplace_back(0, nobody_pwd->pw_uid);
+    config.gid_map.emplace_back(0, nobody_pwd->pw_gid);
 
-    return core_create_task(exe_path, vec_argv, vec_envp, work_path, root_path,
-	uid, gid, uid_map, gid_map, timelimit, memlimit,
-	(sandbox_restrict_level)restrict_level);
+    return core_create_task(exe_path, vec_argv, vec_envp, config);
 }
 
 static void stop_task_callback(
