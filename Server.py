@@ -1,4 +1,4 @@
-from tornado import gen
+from tornado import gen, concurrent
 from tornado.ioloop import IOLoop, PollIOLoop
 from tornado.web import Application, RequestHandler
 import PyExt
@@ -15,10 +15,11 @@ class UVIOLoop(PollIOLoop):
         super().initialize(impl = PyExt.UvPoll(), **kwargs)
 
 
-@gen.engine
+@gen.coroutine
 def test():
     chal = StdChal(573, 'lib/test.cpp', 'g++', [])
-    chal.start()
+    ret = yield chal.start()
+    print(ret)
 
     '''
     task_id = PyExt.create_task('/usr/bin/g++',
@@ -28,7 +29,6 @@ def test():
         11000, 10000, 1200, 10 * 1024 * 1024)
     PyExt.start_task(task_id, lambda x: x)
     '''
-
 
 def main():
     PyExt.init()

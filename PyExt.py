@@ -110,12 +110,16 @@ def init():
     @ffi.callback('void(unsigned long, struct taskstat)')
     def task_stop_cb(task_id, stat):
         global task_map
-        task_map[task_id](task_id,{
-            'utime': stat.utime,
-            'stime': stat.stime,
-            'peakmem': stat.peakmem,
-            'detect_error': stat.detect_error,
-        })
+        IOLoop.instance().add_callback(
+            task_map[task_id],
+            task_id,
+            {
+                'utime': stat.utime,
+                'stime': stat.stime,
+                'peakmem': stat.peakmem,
+                'detect_error': stat.detect_error,
+            }
+        )
         del task_map[task_id]
 
 

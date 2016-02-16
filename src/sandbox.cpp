@@ -186,7 +186,7 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	if(siginfo->si_status == 0) {
 	    stop(false);
 	} else {
-	    stop(false);
+	    stop(true);
 	}
 	return;
     }

@@ -22,7 +22,7 @@ class Task {
 };
 
 int core_init();
-int core_poll();
+int core_poll(bool nowait);
 int core_defer(func_core_defer_callback callback, void *data);
 unsigned long core_create_task(const std::string &exe_path,
     const std::vector<std::string> &argv,

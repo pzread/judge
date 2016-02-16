@@ -2,6 +2,7 @@ import os
 import shutil
 from tornado import gen
 from tornado import concurrent
+from tornado.ioloop import IOLoop
 import PyExt
 import Config
 
@@ -28,14 +29,19 @@ class StdChal:
         self.compile_uid = StdChal.last_compile_uid
         self.compile_gid = self.compile_uid
 
-    @gen.engine
+    @gen.coroutine
     def start(self):
         self.chal_path = 'container/standard/home/%d'%self.chal_id
         os.mkdir(self.chal_path, mode=0o711)
 
         if self.comp_typ == 'g++':
             ret = yield self.comp_gxx()
-            print(ret)
+
+        if ret != PyExt.DETECT_NONE:
+            shutil.rmtree(self.chal_path)
+            return {
+                'status': 5,        
+            }
 
         shutil.rmtree(self.chal_path)
             
@@ -53,7 +59,7 @@ class StdChal:
             [
                 '-O2',
                 '-o', './a.out',
-                './a.cpp'
+                './ai.cpp'
             ],
             [
                 'PATH=/usr/bin',

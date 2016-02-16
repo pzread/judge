@@ -40,8 +40,12 @@ int core_init() {
     return 0;
 }
 
-int core_poll() {
-    return uv_run(core_uvloop, UV_RUN_ONCE);
+int core_poll(bool nowait) {
+    if(nowait) {
+	return uv_run(core_uvloop, UV_RUN_NOWAIT);
+    } else {
+	return uv_run(core_uvloop, UV_RUN_ONCE);
+    }
 }
 
 int core_defer(func_core_defer_callback callback, void *data) {

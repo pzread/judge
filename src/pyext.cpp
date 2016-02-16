@@ -38,7 +38,9 @@ static void uvpoll_callback(uv_poll_t *uvpoll, int status, int events) {
 	pend_events.emplace(fd, status);
     }
 }
-static void dummy_uvtimer_callback(uv_timer_t *uvtimer) {}
+static void timeout_uvtimer_callback(uv_timer_t *uvtimer) {
+    uv_stop(core_uvloop);
+}
 
 extern "C" __attribute__((visibility("default"))) int init() {
     if(core_init()) {
@@ -83,8 +85,8 @@ extern "C" __attribute__((visibility("default")))
 int ev_poll(long timeout, eventpair ret[], int maxevts) {
     int i;
 
-    uv_timer_start(&poll_uvtimer, dummy_uvtimer_callback, timeout, 0);
-    core_poll();
+    uv_timer_start(&poll_uvtimer, timeout_uvtimer_callback, timeout, 0);
+    core_poll(false);
     uv_timer_stop(&poll_uvtimer);
 
     i = 0;
