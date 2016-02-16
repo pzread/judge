@@ -72,11 +72,12 @@ unsigned long core_create_task(
     const std::vector<std::pair<unsigned int, unsigned int>> &uid_map,
     const std::vector<std::pair<unsigned int, unsigned int>> &gid_map,
     unsigned long timelimit,
-    unsigned long memlimit
+    unsigned long memlimit,
+    sandbox_restrict_level restrict_level
 ) {
     try {
 	auto sdbx = new Sandbox(exe_path, argv, envp, work_path, root_path,
-	    uid, gid, uid_map, gid_map, timelimit, memlimit);
+	    uid, gid, uid_map, gid_map, timelimit, memlimit, restrict_level);
 	task_map.emplace(std::make_pair(sdbx->id, Task(sdbx, NULL)));
 	return sdbx->id;
     } catch(SandboxException &e) {

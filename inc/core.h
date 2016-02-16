@@ -32,7 +32,8 @@ unsigned long core_create_task(const std::string &exe_path,
     const std::vector<std::pair<unsigned int, unsigned int>> &uid_map,
     const std::vector<std::pair<unsigned int, unsigned int>> &gid_map,
     unsigned long timelimit,
-    unsigned long memlimit);
+    unsigned long memlimit,
+    sandbox_restrict_level restrict_level);
 int core_start_task(unsigned long id, func_core_task_callback callback);
 
 extern uv_loop_t *core_uvloop;

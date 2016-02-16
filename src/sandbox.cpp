@@ -62,13 +62,14 @@ Sandbox::Sandbox(const std::string &_exe_path,
     const std::vector<std::pair<unsigned int, unsigned int>> &_uid_map,
     const std::vector<std::pair<unsigned int, unsigned int>> &_gid_map,
     unsigned long _timelimit,
-    unsigned long _memlimit
+    unsigned long _memlimit,
+    sandbox_restrict_level _restrict_level
 ) :
     state(SANDBOX_STATE_INIT),
     exe_path(_exe_path), argv(_argv), envp(_envp),
     work_path(_work_path), root_path(_root_path),
     uid(_uid), gid(_gid), uid_map(_uid_map), gid_map(_gid_map),
-    timelimit(_timelimit), memlimit(_memlimit),
+    timelimit(_timelimit), memlimit(_memlimit), restrict_level(_restrict_level),
     id(++last_sandbox_id)
 {
     char cg_name[NAME_MAX + 1];
@@ -423,11 +424,13 @@ int Sandbox::sandbox_entry(void *data) {
     if(chdir(sdbx->work_path.c_str())) {
 	_exit(-1);
     }
-    if(sdbx->install_limit()) {
-	_exit(-1);
-    }
-    if(sdbx->install_filter()) {
-	_exit(-1);
+    if(sdbx->restrict_level != SANDBOX_RESTRICT_LOW) {
+	if(sdbx->install_limit()) {
+	    _exit(-1);
+	}
+	if(sdbx->install_filter()) {
+	    _exit(-1);
+	}
     }
 
     unsigned int i;
@@ -447,6 +450,5 @@ int Sandbox::sandbox_entry(void *data) {
     c_envp[sdbx->envp.size()] = NULL;
 
     execve(c_exe_path, c_argv, c_envp);
-    _exit(-1);
-    return 0;
+    return -1;
 }

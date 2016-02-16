@@ -1,5 +1,7 @@
 import os
 import shutil
+from tornado import gen
+from tornado import concurrent
 import PyExt
 import Config
 
@@ -26,14 +28,21 @@ class StdChal:
         self.compile_uid = StdChal.last_compile_uid
         self.compile_gid = self.compile_uid
 
+    @gen.engine
     def start(self):
         self.chal_path = 'container/standard/home/%d'%self.chal_id
         os.mkdir(self.chal_path, mode=0o711)
 
         if self.comp_typ == 'g++':
-            self.comp_gxx()
+            ret = yield self.comp_gxx()
+            print('OK')
             
-    def comp_gxx(self):
+    @concurrent.return_future
+    def comp_gxx(self, callback):
+        def _done_cb(task_id):
+            print('Done')
+            callback()
+
         compile_path = self.chal_path + '/compile'
         os.mkdir(compile_path, mode=0o750)
         os.chown(compile_path, self.compile_uid, self.compile_gid)
@@ -45,7 +54,12 @@ class StdChal:
                 '-o', './a.out',
                 './a.cpp'
             ],
-            ['PATH=/usr/bin', 'TMPDIR=/home/%d/compile'%self.chal_id],
+            [
+                'PATH=/usr/bin',
+                'TMPDIR=/home/%d/compile'%self.chal_id
+            ],
             '/home/%d/compile'%self.chal_id, 'container/standard',
-            self.compile_uid, self.compile_gid, 1200, 256 * 1024 * 1024)
-        PyExt.start_task(task_id, lambda x: x)
+            self.compile_uid, self.compile_gid, 1200, 256 * 1024 * 1024,
+            PyExt.RESTRICT_LEVEL_LOW)
+
+        PyExt.start_task(task_id, _done_cb)

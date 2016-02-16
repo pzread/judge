@@ -13,6 +13,10 @@
 
 #include"utils.h"
 
+enum sandbox_restrict_level {
+    SANDBOX_RESTRICT_LOW = 0,
+    SANDBOX_RESTRICT_HIGH = 1,
+};
 class Sandbox;
 typedef void (*func_sandbox_stop_callback)(Sandbox *sdbx);
 
@@ -54,6 +58,7 @@ class Sandbox {
 	std::vector<std::pair<unsigned int, unsigned int>> gid_map;
 	unsigned long timelimit;
 	unsigned long memlimit;
+	sandbox_restrict_level restrict_level;
 
 	struct cgroup *cg;
 	struct cgroup_controller *memcg;
@@ -88,7 +93,8 @@ class Sandbox {
 	    const std::vector<std::pair<unsigned int, unsigned int>> &_uid_map,
 	    const std::vector<std::pair<unsigned int, unsigned int>> &_gid_map,
 	    unsigned long _timelimit,
-	    unsigned long _memlimit);
+	    unsigned long _memlimit,
+	    sandbox_restrict_level _restrict_level);
 	~Sandbox();
 	void start(func_sandbox_stop_callback _stop_callback);
 	void terminate();

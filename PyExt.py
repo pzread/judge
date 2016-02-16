@@ -2,9 +2,14 @@ from cffi import FFI
 from tornado.ioloop import IOLoop
 
 
+RESTRICT_LEVEL_LOW = 0
+RESTRICT_LEVEL_HIGH = 1
+
+
 ffi = None
 pyextlib = None
-task_callback = {}
+task_stop_cb = None
+task_map = {}
 
 
 class UvPoll:
@@ -60,6 +65,7 @@ class UvPoll:
 def init():
     global ffi
     global pyextlib
+    global task_stop_cb
 
     ffi = FFI()
     ffi.cdef('''
@@ -77,19 +83,19 @@ def init():
         char exe_path[], char *argv[], char *envp[],
         char work_path[], char root_path[],
         unsigned int uid, unsigned int gid,
-        unsigned long timelimit, unsigned long memlimit);''')
+        unsigned long timelimit, unsigned long memlimit,
+        int restrict_level);''')
     ffi.cdef('''int start_task(
         unsigned long id,
         void (*callback)(unsigned long id));''')
     pyextlib = ffi.dlopen('lib/libpyext.so')
     pyextlib.init()
 
-    global done_cb
     @ffi.callback('void(unsigned long)')
-    def done_cb(task_id):
-        global task_callback
-        task_callback[task_id](task_id)
-        del task_callback[task_id]
+    def task_stop_cb(task_id):
+        global task_map
+        task_map[task_id](task_id)
+        del task_map[task_id]
 
 
 def create_task(
@@ -101,7 +107,8 @@ def create_task(
     uid,
     gid,
     timelimit,
-    memlimit
+    memlimit,
+    restrict_level
 ):
     global ffi
     global pyextlib
@@ -111,23 +118,28 @@ def create_task(
     for arg in argv:
         ffi_argv.append(ffi.new('char[]', arg.encode('utf-8')))
     ffi_argv.append(ffi.NULL)
+
     ffi_envp = []
     for env in envp:
         ffi_envp.append(ffi.new('char[]', env.encode('utf-8')))
     ffi_envp.append(ffi.NULL)
+
     ffi_work_path = ffi.new('char[]', work_path.encode('utf-8'))
     ffi_root_path = ffi.new('char[]', root_path.encode('utf-8'))
 
     task_id = pyextlib.create_task(ffi_exe_path, ffi_argv, ffi_envp,
-        ffi_work_path,ffi_root_path, uid, gid, timelimit, memlimit)
+        ffi_work_path, ffi_root_path, uid, gid, timelimit, memlimit,
+        restrict_level)
+
     if task_id == 0:
         return None
 
     return task_id
 
-def start_task(task_id, callback):
-    global done_cb
-    global task_callback
 
-    task_callback[task_id] = callback
-    return pyextlib.start_task(task_id, done_cb)
+def start_task(task_id, callback):
+    global task_stop_cb
+    global task_map
+
+    task_map[task_id] = callback
+    return pyextlib.start_task(task_id, task_stop_cb)

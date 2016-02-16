@@ -10,6 +10,7 @@
 
 #include"utils.h"
 #include"core.h"
+#include"sandbox.h"
 
 struct eventpair {
     int fd;
@@ -104,7 +105,8 @@ unsigned long create_task(
     unsigned int uid,
     unsigned int gid,
     unsigned long timelimit,
-    unsigned long memlimit
+    unsigned long memlimit,
+    int restrict_level
 ) {
     int i;
     std::vector<std::string> vec_argv;
@@ -129,8 +131,9 @@ unsigned long create_task(
     uid_map.emplace_back(0, nobody_pwd->pw_uid);
     gid_map.emplace_back(0, nobody_pwd->pw_gid);
 
-    return core_create_task(exe_path, vec_argv, vec_envp,
-	work_path, root_path, uid, gid, uid_map, gid_map, timelimit, memlimit);
+    return core_create_task(exe_path, vec_argv, vec_envp, work_path, root_path,
+	uid, gid, uid_map, gid_map, timelimit, memlimit,
+	(sandbox_restrict_level)restrict_level);
 }
 
 extern "C" __attribute__((visibility("default")))

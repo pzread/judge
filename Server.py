@@ -1,3 +1,4 @@
+from tornado import gen
 from tornado.ioloop import IOLoop, PollIOLoop
 from tornado.web import Application, RequestHandler
 import PyExt
@@ -14,6 +15,7 @@ class UVIOLoop(PollIOLoop):
         super().initialize(impl = PyExt.UvPoll(), **kwargs)
 
 
+@gen.engine
 def test():
     chal = StdChal(573, 'lib/test.cpp', 'g++', [])
     chal.start()
