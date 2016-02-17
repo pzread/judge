@@ -4,7 +4,6 @@ mkdir -p $1/usr/bin
 mkdir -p $1/usr/lib
 mkdir -p $1/lib
 mkdir -p $1/lib64
-mkdir -p $1/tmp
 
 cp /usr/bin/g++ $1/usr/bin/g++
 cp /usr/bin/clang++ $1/usr/bin/clang++
@@ -19,5 +18,3 @@ cp -a /lib/x86_64-linux-gnu $1/lib/x86_64-linux-gnu
 cp -a /lib64/ld-linux-x86-64.so.2 $1/lib64/ld-linux-x86-64.so.2
 
 sudo chown -R root:root $1
-sudo chmod 730 $1/tmp
-sudo chown root:10000 $1/tmp
