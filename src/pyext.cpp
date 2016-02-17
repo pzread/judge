@@ -68,7 +68,7 @@ extern "C" __attribute__((visibility("default")))
 int ev_unregister(int fd) {
     assert(poll_map.find(fd) != poll_map.end());
 
-    auto uvpoll = poll_map[fd];
+    uv_poll_t *uvpoll = poll_map[fd];
     uv_poll_stop(uvpoll);
     poll_map.erase(fd);
     delete uvpoll;

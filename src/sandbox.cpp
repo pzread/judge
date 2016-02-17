@@ -69,12 +69,13 @@ Sandbox::Sandbox(const std::string &_exe_path,
     char oom_path[PATH_MAX + 1];
     int oom_fd;
     char memevt_param[256];
-    uv_handle_t *uvhandle;
 
     cg = NULL;
     memcg = NULL;
     oom_fd = -1;
     memevt_fd = -1;
+    memevt_uvpoll = NULL;
+    force_uvtimer = NULL;
 
     try{ 
 	snprintf(cg_name, sizeof(cg_name), "hypex_%lu", id);
@@ -92,11 +93,6 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	if((memevt_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK)) < 0) {
 	    throw SandboxException("Set memory event failed.");
 	}
-	uv_poll_init(core_uvloop, &memevt_uvpoll, memevt_fd);
-	uvhandle = (uv_handle_t*)&memevt_uvpoll;
-	uvhandle->data = this;
-	uv_poll_start(&memevt_uvpoll, UV_READABLE, memevt_uvpoll_callback);
-
 	if(cgroup_get_subsys_mount_point("memory", &memcg_path)) {
 	    throw SandboxException("Set memory event failed.");
 	}
@@ -121,16 +117,27 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	close(oom_fd);
 	oom_fd = -1;
 
-	uv_timer_init(core_uvloop, &force_uvtimer);
-	uvhandle = (uv_handle_t*)&force_uvtimer;
-	uvhandle->data = this;
+	memevt_uvpoll = new uv_poll_t();
+	uv_poll_init(core_uvloop, memevt_uvpoll, memevt_fd);
+	((uv_handle_t*)memevt_uvpoll)->data = this;
+	uv_poll_start(memevt_uvpoll, UV_READABLE, memevt_uvpoll_callback);
+
+	force_uvtimer = new uv_timer_t();
+	uv_timer_init(core_uvloop, force_uvtimer);
+	((uv_handle_t*)force_uvtimer)->data = this;
 
     } catch(SandboxException &e) {
+	if(memevt_uvpoll != NULL) {
+	    delete memevt_uvpoll;
+	    uv_poll_stop(memevt_uvpoll);
+	}
+	if(force_uvtimer != NULL) {
+	    delete force_uvtimer;
+	}
 	if(oom_fd >= 0) {
 	    close(oom_fd);
 	}
 	if(memevt_fd >= 0) {
-	    uv_poll_stop(&memevt_uvpoll);
 	    close(memevt_fd);
 	}
         if(cg != NULL) {
@@ -142,7 +149,9 @@ Sandbox::Sandbox(const std::string &_exe_path,
 }
 
 Sandbox::~Sandbox() {
-    uv_poll_stop(&memevt_uvpoll);
+    uv_poll_stop(memevt_uvpoll);
+    delete memevt_uvpoll;
+    delete force_uvtimer;
     close(memevt_fd);
     cgroup_delete_cgroup(cg, 1);
     cgroup_free(&cg);
@@ -170,7 +179,7 @@ void Sandbox::stop(bool exit_error) {
 	stat.detect_error = SandboxStat::SANDBOX_STAT_INTERNALERR;
     } else if(state == SANDBOX_STATE_RUNNING) {
 	run_map.erase(child_pid);
-	uv_timer_stop(&force_uvtimer);
+	uv_timer_stop(force_uvtimer);
     }
     state = SANDBOX_STATE_STOP;
 
@@ -178,7 +187,7 @@ void Sandbox::stop(bool exit_error) {
 	stat.detect_error = SandboxStat::SANDBOX_STAT_EXITERR;
     }
 
-    core_defer((func_core_defer_callback)stop_callback, this);
+    core_defer((func_core_defer_callback)stop_callback, (void*)id);
 }
 
 void Sandbox::update_state(siginfo_t *siginfo) {
@@ -230,7 +239,7 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	fclose(f_uidmap);
 	fclose(f_gidmap);
 
-	uv_timer_start(&force_uvtimer, force_uvtimer_callback,
+	uv_timer_start(force_uvtimer, force_uvtimer_callback,
 	    config.timelimit * 4 + 1000, 0);
 	if(cgroup_attach_task_pid(cg, child_pid)) {
 	    throw SandboxException("Move to cgroup failed.");
@@ -420,7 +429,7 @@ int Sandbox::read_stat(
 void Sandbox::update_sandboxes(siginfo_t *siginfo) {
     auto sdbx_it = run_map.find(siginfo->si_pid);
     if(sdbx_it != run_map.end()) {
-	auto sdbx = sdbx_it->second;
+	Sandbox *sdbx = sdbx_it->second;
 	try {
 	    sdbx->update_state(siginfo);
 	} catch(SandboxException &e) {

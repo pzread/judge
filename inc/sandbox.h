@@ -19,7 +19,7 @@ enum sandbox_restrict_level {
     SANDBOX_RESTRICT_LOW = 0,
     SANDBOX_RESTRICT_HIGH = 1,
 };
-typedef void (*func_sandbox_stop_callback)(Sandbox *sdbx);
+typedef void (*func_sandbox_stop_callback)(unsigned long id);
 
 class SandboxException : public std::exception {
     private:
@@ -88,9 +88,9 @@ class Sandbox {
 
 	struct cgroup *cg;
 	struct cgroup_controller *memcg;
-	uv_timer_t force_uvtimer;
-	uv_poll_t memevt_uvpoll;
 	int memevt_fd;
+	uv_poll_t *memevt_uvpoll;
+	uv_timer_t *force_uvtimer;
 
 
     public:

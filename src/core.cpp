@@ -1,9 +1,11 @@
 #define LOG_PREFIX "core"
 
+#include<cstring>
 #include<cassert>
 #include<string>
 #include<unordered_map>
 #include<queue>
+#include<memory>
 #include<uv.h>
 
 #include"utils.h"
@@ -49,21 +51,21 @@ int core_poll(bool nowait) {
 }
 
 int core_defer(func_core_defer_callback callback, void *data) {
-    defer_queue.emplace(callback, data);
+    defer_queue.emplace(std::make_pair(callback, data));
     uv_timer_start(&defer_uvtimer, defer_uvtimer_callback, 0, 0);
     return 0;
 }
 
-static void sandbox_stop_callback(Sandbox *sdbx) {
-    auto task_it = task_map.find(sdbx->id);
+static void sandbox_stop_callback(unsigned long id) {
+    auto task_it = task_map.find(id);
     assert(task_it != task_map.end());
 
-    auto &task = task_it->second;
+    Task task = task_it->second;
     assert(task.callback != NULL);
-    task.callback(sdbx->id, sdbx->stat, task.data);
+    task.callback(id, task.sdbx->stat, task.data);
 
+    delete task.sdbx;
     task_map.erase(task_it);
-    delete(task.sdbx);
 
     INFO("Task finished.\n");
 }
@@ -76,7 +78,7 @@ unsigned long core_create_task(
 ) {
     try {
 	auto sdbx = new Sandbox(exe_path, argv, envp, config);
-	task_map.emplace(std::make_pair(sdbx->id, Task(sdbx, NULL, NULL)));
+	task_map.insert(std::make_pair(sdbx->id, Task(sdbx, NULL, NULL)));
 	return sdbx->id;
     } catch(SandboxException &e) {
 	return 0;
@@ -101,8 +103,8 @@ int core_start_task(
     try{
 	task.sdbx->start(sandbox_stop_callback);
     } catch(SandboxException &e) {
-	task_map.erase(task_it);
 	delete task.sdbx;
+	task_map.erase(task_it);
 	return -1;
     }
     return 0;

@@ -105,13 +105,14 @@ class StdChal:
             end_flag = False
             if events & IOLoop.WRITE:
                 while True:
-                    data = infile.read(65536)
+                    data = infile.read(4096)
                     if len(data) == 0:
                         end_flag = True
                         break
                     try:
                         ret = os.write(inpipe_fd[1], data) 
                     except BlockingIOError:
+                        infile.seek(-len(data), 1)
                         break
                     if ret == 0:
                         end_flag = True
