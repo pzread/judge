@@ -16,19 +16,17 @@ class UVIOLoop(PollIOLoop):
 
 
 @gen.coroutine
-def test():
-    chal = StdChal(573, 'lib/test.cpp', 'g++', [
+def test(chal_id):
+    chal = StdChal(chal_id, 'lib/test.cpp', 'g++', [
         {
             'in':'lib/in.txt',
             'ans':'lib/out.txt',
             'timelimit': 500,
             'memlimit': 128 * 1024 * 1024,
         }
-    ] * 100)
+    ] * 1)
     ret = yield chal.start()
     print(ret)
-
-    IOLoop.instance().add_callback(test)
 
     '''
     task_id = PyExt.create_task('/usr/bin/g++',
@@ -48,7 +46,7 @@ def main():
     ])
     app.listen(6000)
 
-    IOLoop.instance().add_callback(test)
+    IOLoop.instance().add_callback(test, 1)
 
     IOLoop.instance().start()
 

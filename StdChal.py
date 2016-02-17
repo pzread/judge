@@ -85,7 +85,7 @@ class StdChal:
 
     @concurrent.return_future
     def judge_diff(self, in_path, ans_path, timelimit, memlimit, callback):
-        infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
+        infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECT)
         ansfile = open(ans_path, 'rb')
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
         result_stat = None
