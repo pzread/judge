@@ -1,8 +1,7 @@
 import os
 import shutil
 import mmap
-from tornado import gen
-from tornado import concurrent
+from tornado import gen, concurrent, process
 from tornado.ioloop import IOLoop
 import PyExt
 import Config
@@ -47,10 +46,23 @@ class StdChal:
                 'status': 5,        
             }
 
+        prefetch_proc = []
         test_future = []
         for test in self.test_list:
+            prefetch_proc.append(process.Subprocess(
+                ['./Prefetch.py', test['in']],
+                stdout=process.Subprocess.STREAM))
+            prefetch_proc.append(process.Subprocess(
+                ['./Prefetch.py', test['ans']],
+                stdout=process.Subprocess.STREAM))
+
             test_future.append(self.judge_diff(test['in'], test['ans'],
                 test['timelimit'], test['memlimit']))
+
+        prefetch_future = []
+        for proc in prefetch_proc:
+            prefetch_future.append(proc.stdout.read_bytes(2))
+        yield gen.multi(prefetch_future)
 
         test_result = yield gen.multi(test_future)
         print(test_result)
@@ -87,14 +99,6 @@ class StdChal:
     @concurrent.return_future
     def judge_diff(self, in_path, ans_path, timelimit, memlimit, callback):
         infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
-
-        #Try to prefetch the input file
-        infile_size = os.fstat(infile_fd).st_size
-        for i in range(0, infile_size, 16384):
-            os.lseek(infile_fd, i, os.SEEK_SET)
-            os.read(infile_fd, 1)
-        os.lseek(infile_fd, 0, os.SEEK_SET)
-
         ansfile = open(ans_path, 'rb')
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
         result_stat = None
