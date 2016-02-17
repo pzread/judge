@@ -48,18 +48,24 @@ class StdChal:
                 'status': 5,        
             }
 
-        prefetch_future = []
+        prefetch_proc = []
         test_future = []
         for test in self.test_list:
-            prefetch_future.append(process.Subprocess(
-                ['./Prefetch.py', test['in']]).wait_for_exit())
-            prefetch_future.append(process.Subprocess(
-                ['./Prefetch.py', test['ans']]).wait_for_exit())
+            prefetch_proc.append(process.Subprocess(
+                ['./Prefetch.py', test['in']],
+                stdout=process.Subprocess.STREAM))
+            prefetch_proc.append(process.Subprocess(
+                ['./Prefetch.py', test['ans']],
+                stdout=process.Subprocess.STREAM))
 
             test_future.append(self.judge_diff(test['in'], test['ans'],
                 test['timelimit'], test['memlimit']))
 
+        prefetch_future = []
+        for proc in prefetch_proc:
+            prefetch_future.append(proc.stdout.read_bytes(2))
         yield gen.multi(prefetch_future)
+
         test_result = yield gen.multi(test_future)
         print(test_result)
 
