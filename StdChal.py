@@ -1,5 +1,6 @@
 import os
 import shutil
+import mmap
 from tornado import gen
 from tornado import concurrent
 from tornado.ioloop import IOLoop
@@ -85,7 +86,15 @@ class StdChal:
 
     @concurrent.return_future
     def judge_diff(self, in_path, ans_path, timelimit, memlimit, callback):
-        infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECT)
+        infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
+
+        #Try to prefetch the input file
+        infile_size = os.fstat(infile_fd).st_size
+        for i in range(0, infile_size, 16384):
+            os.lseek(infile_fd, i, os.SEEK_SET)
+            os.read(infile_fd, 1)
+        os.lseek(infile_fd, 0, os.SEEK_SET)
+
         ansfile = open(ans_path, 'rb')
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
         result_stat = None
