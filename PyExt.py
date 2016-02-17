@@ -1,5 +1,7 @@
 from cffi import FFI
+from collections import deque
 from tornado.ioloop import IOLoop
+import Config
 
 
 RESTRICT_LEVEL_LOW = 0
@@ -17,6 +19,8 @@ ffi = None
 pyextlib = None
 task_stop_cb = None
 task_map = {}
+task_queue = deque()
+task_running_count = 0
 
 
 class UvPoll:
@@ -111,8 +115,13 @@ def init():
     @ffi.callback('void(unsigned long, struct taskstat)')
     def task_stop_cb(task_id, stat):
         global task_map
+        global task_running_count
+
+        callback, _ = task_map[task_id]
+        del task_map[task_id]
+
         IOLoop.instance().add_callback(
-            task_map[task_id],
+            callback,
             task_id,
             {
                 'utime': stat.utime,
@@ -121,7 +130,9 @@ def init():
                 'detect_error': stat.detect_error,
             }
         )
-        del task_map[task_id]
+
+        task_running_count -= 1
+        IOLoop.instance().add_callback(emit_task)
 
 
 def create_task(
@@ -166,9 +177,28 @@ def create_task(
     return task_id
 
 
-def start_task(task_id, callback):
+def start_task(task_id, callback, started_callback=None):
     global task_stop_cb
     global task_map
+    global task_queue
 
-    task_map[task_id] = callback
-    return pyextlib.start_task(task_id, task_stop_cb)
+    task_map[task_id] = (callback, started_callback)
+    task_queue.append(task_id)
+    emit_task()
+
+
+def emit_task():
+    global task_map
+    global task_queue
+    global task_running_count
+
+    while len(task_queue) > 0 \
+        and task_running_count < Config.TASK_MAXCONCURRENT:
+        task_id = task_queue.popleft()
+        task_running_count += 1
+        _, started_callback = task_map[task_id]
+
+        pyextlib.start_task(task_id, task_stop_cb)
+
+        if started_callback is not None:
+            started_callback(task_id)

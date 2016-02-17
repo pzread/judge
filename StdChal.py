@@ -46,11 +46,13 @@ class StdChal:
                 'status': 5,        
             }
 
+        test_future = []
         for test in self.test_list:
-            print(test)
-            ret = yield self.judge_diff(test['in'], test['ans'],
-                test['timelimit'], test['memlimit'])
-            print(ret)
+            test_future.append(self.judge_diff(test['in'], test['ans'],
+                test['timelimit'], test['memlimit']))
+
+        test_result = yield gen.multi(test_future)
+        print(test_result)
 
         shutil.rmtree(self.chal_path)
             
@@ -83,12 +85,17 @@ class StdChal:
 
     @concurrent.return_future
     def judge_diff(self, in_path, ans_path, timelimit, memlimit, callback):
-        infile = open(in_path, 'rb')
+        infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
         ansfile = open(ans_path, 'rb')
-        inpipe_fd = os.pipe2(os.O_CLOEXEC)
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
         result_stat = None
         result_pass = None
+
+        def _started_cb(task_id):
+            nonlocal infile_fd
+            nonlocal outpipe_fd
+            os.close(infile_fd)
+            os.close(outpipe_fd[1])
 
         def _done_cb(task_id, stat):
             nonlocal result_stat
@@ -97,33 +104,6 @@ class StdChal:
             result_stat = (stat['utime'], stat['peakmem'], stat['detect_error'])
             if result_pass is not None:
                 callback((result_pass, result_stat))
-
-        def _diff_in(fd, events):
-            nonlocal inpipe_fd
-            nonlocal infile
-
-            end_flag = False
-            if events & IOLoop.WRITE:
-                while True:
-                    data = infile.read(4096)
-                    if len(data) == 0:
-                        end_flag = True
-                        break
-                    try:
-                        ret = os.write(inpipe_fd[1], data) 
-                    except BlockingIOError:
-                        infile.seek(-len(data), 1)
-                        break
-                    if ret == 0:
-                        end_flag = True
-                        break
-                    if ret < len(data):
-                        infile.seek(-(len(data) - ret), 1)
-
-            if (events & IOLoop.ERROR) or end_flag:
-                IOLoop.instance().remove_handler(fd)
-                os.close(inpipe_fd[1])
-                infile.close()
 
         def _diff_out(fd, events):
             nonlocal outpipe_fd
@@ -168,20 +148,16 @@ class StdChal:
         os.chown(judge_path + '/a.out', judge_uid, judge_gid)
         os.chmod(judge_path + '/a.out', 0o700)
 
+        IOLoop.instance().add_handler(outpipe_fd[0], _diff_out,
+            IOLoop.READ | IOLoop.ERROR)
+
         task_id = PyExt.create_task('/home/%d/run_%d/a.out'%(
                 self.chal_id, judge_uid),
             [],
             [],
-            inpipe_fd[0], outpipe_fd[1], outpipe_fd[1],
+            infile_fd, outpipe_fd[1], outpipe_fd[1],
             '/home/%d/run_%d'%(self.chal_id, judge_uid), 'container/standard',
             judge_uid, judge_gid, timelimit, memlimit,
             PyExt.RESTRICT_LEVEL_HIGH)
 
-        PyExt.start_task(task_id, _done_cb)
-
-        os.close(inpipe_fd[0])
-        os.close(outpipe_fd[1])
-        IOLoop.instance().add_handler(inpipe_fd[1], _diff_in,
-            IOLoop.WRITE | IOLoop.ERROR)
-        IOLoop.instance().add_handler(outpipe_fd[0], _diff_out,
-            IOLoop.READ | IOLoop.ERROR)
+        PyExt.start_task(task_id, _done_cb, _started_cb)

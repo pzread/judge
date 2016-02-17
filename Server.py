@@ -21,12 +21,14 @@ def test():
         {
             'in':'lib/in.txt',
             'ans':'lib/out.txt',
-            'timelimit': 1500,
+            'timelimit': 500,
             'memlimit': 128 * 1024 * 1024,
-        },
-    ])
+        }
+    ] * 100)
     ret = yield chal.start()
     print(ret)
+
+    IOLoop.instance().add_callback(test)
 
     '''
     task_id = PyExt.create_task('/usr/bin/g++',
