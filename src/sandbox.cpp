@@ -19,6 +19,7 @@
 #include<sys/signal.h>
 #include<sys/user.h>
 #include<sys/eventfd.h>
+#include<sys/resource.h>
 #include<linux/seccomp.h>
 #include<linux/filter.h>
 #include<linux/audit.h>
@@ -126,6 +127,8 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	uv_timer_init(core_uvloop, force_uvtimer);
 	((uv_handle_t*)force_uvtimer)->data = this;
 
+	execve_count = 0;
+
     } catch(SandboxException &e) {
 	if(memevt_uvpoll != NULL) {
 	    delete memevt_uvpoll;
@@ -210,44 +213,59 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	}
 	if(ptrace(PTRACE_SETOPTIONS, child_pid, NULL,
 	    PTRACE_O_EXITKILL | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESECCOMP |
-	    PTRACE_O_TRACESYSGOOD)) {
+	    PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEEXEC)) {
 	    throw SandboxException("Trace task failed.");
 	}
 
 	char path[PATH_MAX + 1];
-	FILE *f_uidmap;
-	FILE *f_gidmap;
+	FILE *f_uidmap = NULL;
+	FILE *f_gidmap = NULL;
 
-	snprintf(path, sizeof(path), "/proc/%d/uid_map", child_pid);
-	if((f_uidmap = fopen(path, "w")) == NULL) {
-	    throw SandboxException("Open uid_map failed.");
-	}
-	snprintf(path, sizeof(path), "/proc/%d/gid_map", child_pid);
-	if((f_gidmap = fopen(path, "w")) == NULL) {
-	    throw SandboxException("Open gid_map failed.");
-	}
-	for(auto uidpair : config.uid_map) {
-	    auto sdbx_uid = uidpair.first;
-	    auto parent_uid = uidpair.second;
-	    fprintf(f_uidmap, "%u %u 1\n", sdbx_uid, parent_uid);
-	}
-	for(auto gidpair : config.gid_map) {
-	    auto sdbx_gid = gidpair.first;
-	    auto parent_gid = gidpair.second;
-	    fprintf(f_gidmap, "%u %u 1\n", sdbx_gid, parent_gid);
-	}
-	fclose(f_uidmap);
-	fclose(f_gidmap);
+	try{
+	    snprintf(path, sizeof(path), "/proc/%d/uid_map", child_pid);
+	    if((f_uidmap = fopen(path, "w")) == NULL) {
+		throw SandboxException("Open uid_map failed.");
+	    }
+	    snprintf(path, sizeof(path), "/proc/%d/gid_map", child_pid);
+	    if((f_gidmap = fopen(path, "w")) == NULL) {
+		throw SandboxException("Open gid_map failed.");
+	    }
+	    for(auto uidpair : config.uid_map) {
+		auto sdbx_uid = uidpair.first;
+		auto parent_uid = uidpair.second;
+		fprintf(f_uidmap, "%u %u 1\n", sdbx_uid, parent_uid);
+	    }
+	    for(auto gidpair : config.gid_map) {
+		auto sdbx_gid = gidpair.first;
+		auto parent_gid = gidpair.second;
+		fprintf(f_gidmap, "%u %u 1\n", sdbx_gid, parent_gid);
+	    }
+	    fclose(f_uidmap);
+	    f_uidmap = NULL;
+	    fclose(f_gidmap);
+	    f_gidmap  =NULL;
 
-	uv_timer_start(force_uvtimer, force_uvtimer_callback,
-	    config.timelimit * 4 + 1000, 0);
+	} catch(SandboxException &e) {
+	    if(f_uidmap != NULL) {
+		fclose(f_uidmap);
+	    }
+	    if(f_gidmap != NULL) {
+		fclose(f_gidmap);
+	    }
+	    throw e;
+	}
+
 	if(cgroup_attach_task_pid(cg, child_pid)) {
 	    throw SandboxException("Move to cgroup failed.");
 	}
 
+	state = SANDBOX_STATE_RUNNING;
+	//Must start timer after change state to running.
+	uv_timer_start(force_uvtimer, force_uvtimer_callback,
+	    config.timelimit * 4 + 1000, 0);
+
 	kill(child_pid, SIGCONT);
 	ptrace(PTRACE_CONT, child_pid, NULL, NULL);
-	state = SANDBOX_STATE_RUNNING;
 
     } else if(state == SANDBOX_STATE_RUNNING) {
 	if(siginfo->si_code != CLD_TRAPPED) {
@@ -255,13 +273,20 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    return;
 	}
 
-	if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_EXIT<<8))) {
+	if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_EXEC<<8))) {
+	    if(execve_count > 0) {
+		terminate();
+	    }
+	    execve_count += 1;
+	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
+
+	} else if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_EXIT<<8))) {
 	    if(read_stat(&stat.utime, &stat.stime, &stat.peakmem)) {
 		throw SandboxException("Read stat failed.");
 	    }
 	    ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 
-	}else if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_SECCOMP<<8))) {
+	} else if(siginfo->si_status == (SIGTRAP | (PTRACE_EVENT_SECCOMP<<8))) {
 	    unsigned long nr;
 
 	    if(ptrace(PTRACE_GETEVENTMSG, child_pid ,NULL, &nr)) {
@@ -318,14 +343,43 @@ void Sandbox::terminate() {
 }
 
 int Sandbox::install_limit() const {
-    struct itimerval time;
+    itimerval time;
+    rlimit lim;
 
-    time.it_interval.tv_sec = 0;
-    time.it_interval.tv_usec = 0;
-    time.it_value.tv_sec = (config.timelimit + 1) / 1000;
-    time.it_value.tv_usec = ((config.timelimit + 1) % 1000) * 1000;
-    signal(SIGVTALRM, SIG_DFL);
-    return setitimer(ITIMER_VIRTUAL, &time, NULL);
+    lim.rlim_cur = 2147483647;
+    lim.rlim_max = 2147483647;
+    if(setrlimit(RLIMIT_STACK, &lim)) {
+	return -1;
+    }
+    if(config.restrict_level == SANDBOX_RESTRICT_LOW) {
+	lim.rlim_cur = 64;
+	lim.rlim_max = 64;
+	if(setrlimit(RLIMIT_NPROC, &lim)) {
+	    return -1;
+	}
+    } else if(config.restrict_level == SANDBOX_RESTRICT_HIGH) {
+	lim.rlim_cur = 1;
+	lim.rlim_max = 1;
+	if(setrlimit(RLIMIT_NPROC, &lim)) {
+	    return -1;
+	}
+	lim.rlim_cur = 4;
+	lim.rlim_max = 4;
+	if(setrlimit(RLIMIT_NOFILE, &lim)) {
+	    return -1;
+	}
+
+	time.it_interval.tv_sec = 0;
+	time.it_interval.tv_usec = 0;
+	time.it_value.tv_sec = (config.timelimit + 1) / 1000;
+	time.it_value.tv_usec = ((config.timelimit + 1) % 1000) * 1000;
+	signal(SIGVTALRM, SIG_DFL);
+	if(setitimer(ITIMER_VIRTUAL, &time, NULL)) {
+	    return -1;
+	}
+    }
+
+    return 0;
 }
 
 int Sandbox::install_filter() const {
@@ -350,6 +404,18 @@ int Sandbox::install_filter() const {
 
 	//seccomp
 	BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_seccomp, 0, 1),
+	BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | EINVAL),
+
+	//fork
+	BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_fork, 0, 1),
+	BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | EINVAL),
+	
+	//vfork
+	BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_vfork, 0, 1),
+	BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | EINVAL),
+
+	//clone
+	BPF_JUMP(BPF_JMP + BPF_JEQ + BPF_K, __NR_clone, 0, 1),
 	BPF_STMT(BPF_RET + BPF_K, SECCOMP_RET_ERRNO | EINVAL),
 
 	//rt_sigaction
@@ -481,10 +547,11 @@ int Sandbox::sandbox_entry(void *data) {
     if(chdir(sdbx->config.work_path.c_str())) {
 	_exit(-1);
     }
+
+    if(sdbx->install_limit()) {
+	_exit(-1);
+    }
     if(sdbx->config.restrict_level != SANDBOX_RESTRICT_LOW) {
-	if(sdbx->install_limit()) {
-	    _exit(-1);
-	}
 	if(sdbx->install_filter()) {
 	    _exit(-1);
 	}

@@ -91,6 +91,7 @@ class Sandbox {
 	int memevt_fd;
 	uv_poll_t *memevt_uvpoll;
 	uv_timer_t *force_uvtimer;
+	int execve_count;
 
 
     public:

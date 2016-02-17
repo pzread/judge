@@ -133,7 +133,10 @@ class StdChal:
                         end_flag = True
                         break
                     if len(ansdata) == 0:
-                        result_pass = True
+                        if len(ansfile.read(1)) == 0:
+                            result_pass = True
+                        else:
+                            result_pass = False
                         end_flag = True
                         break
 
@@ -150,12 +153,11 @@ class StdChal:
         judge_gid = judge_uid
 
         judge_path = self.chal_path + '/run_%d'%judge_uid
-        os.mkdir(judge_path, mode=0o750)
-        os.chown(judge_path, judge_uid, judge_gid)
+        os.mkdir(judge_path, mode=0o751)
         shutil.copyfile(self.chal_path + '/compile/a.out',
             judge_path + '/a.out')
         os.chown(judge_path + '/a.out', judge_uid, judge_gid)
-        os.chmod(judge_path + '/a.out', 0o700)
+        os.chmod(judge_path + '/a.out', 0o100)
 
         IOLoop.instance().add_handler(outpipe_fd[0], _diff_out,
             IOLoop.READ | IOLoop.ERROR)
