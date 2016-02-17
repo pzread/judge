@@ -1,14 +1,14 @@
 import os
 import shutil
 import mmap
-from tornado import gen
-from tornado import concurrent
+from tornado import gen, concurrent, process
 from tornado.ioloop import IOLoop
 import PyExt
 import Config
 
 
 class StdChal:
+    last_uniqid = 0
     last_compile_uid = Config.CONTAINER_STANDARD_UID_BASE
     last_judge_uid = Config.CONTAINER_RESTRICT_UID_BASE
     null_fd = None
@@ -22,8 +22,9 @@ class StdChal:
 
         StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
 
-    def __init__(self, chal_id, code_path, comp_typ, test_list):
-        self.chal_id = chal_id
+    def __init__(self, code_path, comp_typ, test_list):
+        StdChal.last_uniqid += 1
+        self.uniqid = StdChal.last_uniqid
         self.code_path = code_path
         self.comp_typ = comp_typ
         self.test_list = test_list
@@ -35,7 +36,7 @@ class StdChal:
 
     @gen.coroutine
     def start(self):
-        self.chal_path = 'container/standard/home/%d'%self.chal_id
+        self.chal_path = 'container/standard/home/%d'%self.uniqid
         os.mkdir(self.chal_path, mode=0o711)
 
         if self.comp_typ == 'g++':
@@ -47,11 +48,18 @@ class StdChal:
                 'status': 5,        
             }
 
+        prefetch_future = []
         test_future = []
         for test in self.test_list:
+            prefetch_future.append(process.Subprocess(
+                ['./Prefetch.py', test['in']]).wait_for_exit())
+            prefetch_future.append(process.Subprocess(
+                ['./Prefetch.py', test['ans']]).wait_for_exit())
+
             test_future.append(self.judge_diff(test['in'], test['ans'],
                 test['timelimit'], test['memlimit']))
 
+        yield gen.multi(prefetch_future)
         test_result = yield gen.multi(test_future)
         print(test_result)
 
@@ -65,7 +73,7 @@ class StdChal:
         compile_path = self.chal_path + '/compile'
         os.mkdir(compile_path, mode=0o750)
         os.chown(compile_path, self.compile_uid, self.compile_gid)
-        os.link(self.code_path, compile_path + '/a.cpp')
+        shutil.copyfile(self.code_path, compile_path + '/a.cpp')
 
         task_id = PyExt.create_task('/usr/bin/g++',
             [
@@ -75,10 +83,10 @@ class StdChal:
             ],
             [
                 'PATH=/usr/bin',
-                'TMPDIR=/home/%d/compile'%self.chal_id
+                'TMPDIR=/home/%d/compile'%self.uniqid
             ],
             StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
-            '/home/%d/compile'%self.chal_id, 'container/standard',
+            '/home/%d/compile'%self.uniqid, 'container/standard',
             self.compile_uid, self.compile_gid, 1200, 256 * 1024 * 1024,
             PyExt.RESTRICT_LEVEL_LOW)
 
@@ -87,14 +95,6 @@ class StdChal:
     @concurrent.return_future
     def judge_diff(self, in_path, ans_path, timelimit, memlimit, callback):
         infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
-
-        #Try to prefetch the input file
-        infile_size = os.fstat(infile_fd).st_size
-        for i in range(0, infile_size, 16384):
-            os.lseek(infile_fd, i, os.SEEK_SET)
-            os.read(infile_fd, 1)
-        os.lseek(infile_fd, 0, os.SEEK_SET)
-
         ansfile = open(ans_path, 'rb')
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
         result_stat = None
@@ -163,11 +163,11 @@ class StdChal:
             IOLoop.READ | IOLoop.ERROR)
 
         task_id = PyExt.create_task('/home/%d/run_%d/a.out'%(
-                self.chal_id, judge_uid),
+                self.uniqid, judge_uid),
             [],
             [],
             infile_fd, outpipe_fd[1], outpipe_fd[1],
-            '/home/%d/run_%d'%(self.chal_id, judge_uid), 'container/standard',
+            '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard',
             judge_uid, judge_gid, timelimit, memlimit,
             PyExt.RESTRICT_LEVEL_HIGH)
 
