@@ -47,7 +47,6 @@ class StdChal:
             }
 
         prefetch_proc = []
-        test_future = []
         for test in self.test_list:
             prefetch_proc.append(process.Subprocess(
                 ['./Prefetch.py', test['in']],
@@ -56,13 +55,15 @@ class StdChal:
                 ['./Prefetch.py', test['ans']],
                 stdout=process.Subprocess.STREAM))
 
-            test_future.append(self.judge_diff(test['in'], test['ans'],
-                test['timelimit'], test['memlimit']))
-
         prefetch_future = []
         for proc in prefetch_proc:
             prefetch_future.append(proc.stdout.read_bytes(2))
         yield gen.multi(prefetch_future)
+
+        test_future = []
+        for test in self.test_list:
+            test_future.append(self.judge_diff(test['in'], test['ans'],
+                test['timelimit'], test['memlimit']))
 
         test_result = yield gen.multi(test_future)
         print(test_result)
