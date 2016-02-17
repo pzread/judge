@@ -7,6 +7,16 @@ import PyExt
 import Config
 
 
+STATUS_NONE = 0 
+STATUS_AC = 1 
+STATUS_WA = 2 
+STATUS_RE = 3 
+STATUS_TLE = 4 
+STATUS_MLE = 5 
+STATUS_CE = 6 
+STATUS_ERR = 7 
+
+
 class StdChal:
     last_uniqid = 0
     last_compile_uid = Config.CONTAINER_STANDARD_UID_BASE
@@ -44,12 +54,9 @@ class StdChal:
 
         if ret != PyExt.DETECT_NONE:
             shutil.rmtree(self.chal_path)
-            return {
-                'status': 5,        
-            }
+            return [(0, 0, STATUS_CE)] * len(self.test_list)
 
         prefetch_proc = []
-        test_future = []
         for test in self.test_list:
             prefetch_proc.append(process.Subprocess(
                 ['./Prefetch.py', test['in']],
@@ -58,18 +65,40 @@ class StdChal:
                 ['./Prefetch.py', test['ans']],
                 stdout=process.Subprocess.STREAM))
 
-            test_future.append(self.judge_diff(test['in'], test['ans'],
-                test['timelimit'], test['memlimit']))
-
         prefetch_future = []
         for proc in prefetch_proc:
             prefetch_future.append(proc.stdout.read_bytes(2))
         yield gen.multi(prefetch_future)
 
+        test_future = []
+        for test in self.test_list:
+            test_future.append(self.judge_diff(test['in'], test['ans'],
+                test['timelimit'], test['memlimit']))
+
         test_result = yield gen.multi(test_future)
-        print(test_result)
+        ret_result = list()
+        for result in test_result:
+            test_pass, data = result
+            runtime, peakmem, error = data
+            status = STATUS_ERR
+            if error == PyExt.DETECT_NONE:
+                if test_pass == True:
+                    status = STATUS_AC                   
+                else:
+                    status = STATUS_WA
+            elif error == PyExt.DETECT_OOM:
+                status = STATUS_MLE
+            elif error == PyExt.DETECT_TIMEOUT \
+                or error == PyExt.DETECT_FORCETIMEOUT:
+                status = STATUS_TLE
+            elif error == PyExt.DETECT_EXITERR:
+                status = STATUS_RE
+            else:
+                status = STATUS_ERR
+            ret_result.append((runtime, peakmem, status))
 
         shutil.rmtree(self.chal_path)
+        return ret_result
             
     @concurrent.return_future
     def comp_gxx(self, callback):
@@ -84,6 +113,7 @@ class StdChal:
         task_id = PyExt.create_task('/usr/bin/g++',
             [
                 '-O2',
+                '-std=c++14',
                 '-o', './a.out',
                 './a.cpp'
             ],
@@ -93,7 +123,7 @@ class StdChal:
             ],
             StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
             '/home/%d/compile'%self.uniqid, 'container/standard',
-            self.compile_uid, self.compile_gid, 1200, 256 * 1024 * 1024,
+            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
             PyExt.RESTRICT_LEVEL_LOW)
 
         PyExt.start_task(task_id, _done_cb)

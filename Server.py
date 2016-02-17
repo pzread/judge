@@ -60,9 +60,30 @@ class JudgeHandler(WebSocketHandler):
         print(code_path)
         print(test_paramlist)
         chal = StdChal(code_path, comp_type, test_paramlist)
-        ret = yield chal.start()
-        print(ret)
-             
+        result_list = yield chal.start()
+
+        idx = 0
+        for test in test_list:
+            test_idx = test['test_idx']
+            data_ids = test['metadata']['data']
+            total_runtime = 0
+            total_mem = 0
+            total_status = 0
+            for data_id in data_ids:
+                runtime, peakmem, status = result_list[idx]
+                total_runtime += runtime
+                total_mem += peakmem
+                total_status = max(total_status, status)
+                idx += 1
+
+            self.write_message(json.dumps({
+                'chal_id': chal_id,
+                'test_idx': test_idx,
+                'state': total_status,
+                'runtime': total_runtime,
+                'memory': total_mem,
+            }))
+
     def on_close(self): 
         pass
 
