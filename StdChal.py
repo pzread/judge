@@ -32,10 +32,11 @@ class StdChal:
 
         StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
 
-    def __init__(self, code_path, comp_typ, test_list):
+    def __init__(self, code_path, comp_typ, res_path, test_list):
         StdChal.last_uniqid += 1
         self.uniqid = StdChal.last_uniqid
         self.code_path = code_path
+        self.res_path = res_path
         self.comp_typ = comp_typ
         self.test_list = test_list
         self.chal_path = None
@@ -49,8 +50,11 @@ class StdChal:
         self.chal_path = 'container/standard/home/%d'%self.uniqid
         os.mkdir(self.chal_path, mode=0o711)
 
-        if self.comp_typ == 'g++':
-            ret = yield self.comp_gxx()
+        if self.comp_typ in ['g++', 'clang++']:
+            ret = yield self.comp_cxx()
+
+        elif self.comp_typ == 'makefile':
+            ret = yield self.comp_make()
 
         if ret != PyExt.DETECT_NONE:
             shutil.rmtree(self.chal_path)
@@ -101,27 +105,64 @@ class StdChal:
         return ret_result
             
     @concurrent.return_future
-    def comp_gxx(self, callback):
+    def comp_cxx(self, callback):
         def _done_cb(task_id, stat):
             callback(stat['detect_error'])
 
         compile_path = self.chal_path + '/compile'
         os.mkdir(compile_path, mode=0o750)
         os.chown(compile_path, self.compile_uid, self.compile_gid)
-        shutil.copyfile(self.code_path, compile_path + '/a.cpp')
+        shutil.copyfile(self.code_path, compile_path + '/test.cpp',
+            follow_symlinks=False)
 
-        task_id = PyExt.create_task('/usr/bin/g++',
+        if self.comp_typ == 'g++':
+            compiler = '/usr/bin/g++'
+        elif self.comp_typ == 'clang++':
+            compiler = '/usr/bin/clang++'
+
+        task_id = PyExt.create_task(compiler,
             [
                 '-O2',
                 '-std=c++14',
                 '-o', './a.out',
-                './a.cpp'
+                './test.cpp',
             ],
             [
                 'PATH=/usr/bin',
-                'TMPDIR=/home/%d/compile'%self.uniqid
+                'TMPDIR=/home/%d/compile'%self.uniqid,
             ],
             StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
+            '/home/%d/compile'%self.uniqid, 'container/standard',
+            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
+            PyExt.RESTRICT_LEVEL_LOW)
+
+        PyExt.start_task(task_id, _done_cb)
+
+    @concurrent.return_future
+    def comp_make(self, callback):
+        def _copy_fn(src, dst, follow_symlinks=True):
+            shutil.copy(src, dst, follow_symlinks=False)
+            os.chown(dst, self.compile_uid, self.compile_gid)
+
+        def _done_cb(task_id, stat):
+            callback(stat['detect_error'])
+
+        make_path = self.chal_path + '/compile'
+        shutil.copytree(self.res_path + '/make', make_path, symlinks=True,
+            copy_function=_copy_fn)
+        os.chmod(make_path, mode=0o750)
+        os.chown(make_path, self.compile_uid, self.compile_gid)
+        shutil.copyfile(self.code_path, make_path + '/main.cpp',
+            follow_symlinks=False)
+
+        task_id = PyExt.create_task('/usr/bin/make',
+            [],
+            [
+                'PATH=/usr/bin',
+                'TMPDIR=/home/%d/compile'%self.uniqid,
+                'OUT=./a.out',
+            ],
+            StdChal.null_fd, 1, 2,
             '/home/%d/compile'%self.uniqid, 'container/standard',
             self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
             PyExt.RESTRICT_LEVEL_LOW)

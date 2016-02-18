@@ -1,3 +1,4 @@
+import os
 import json
 from tornado import gen, concurrent
 from tornado.ioloop import IOLoop, PollIOLoop
@@ -40,7 +41,7 @@ class JudgeHandler(WebSocketHandler):
 
         test_paramlist = list()
         comp_type = test_list[0]['comp_type']
-        assert(comp_type == 'g++')
+        assert(comp_type in ['g++', 'clang++', 'makefile'])
 
         for test in test_list:
             assert(test['comp_type'] == comp_type)
@@ -59,7 +60,7 @@ class JudgeHandler(WebSocketHandler):
 
         print(code_path)
         print(test_paramlist)
-        chal = StdChal(code_path, comp_type, test_paramlist)
+        chal = StdChal(code_path, comp_type, res_path, test_paramlist)
         result_list = yield chal.start()
 
         idx = 0
