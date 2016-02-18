@@ -46,9 +46,30 @@ class StdChal:
         self.compile_gid = self.compile_uid
 
     @gen.coroutine
+    def prefetch(self):
+        path_set = set([self.code_path])
+        for test in self.test_list:
+            path_set.add(os.path.abspath(test['ans']))
+        for root, dirs, files in os.walk(self.res_path):
+            for filename in files:
+                path_set.add(os.path.abspath(os.path.join(root, filename)))
+
+        path_list = list(path_set)
+        proc_list = []
+        for idx in range(0, len(path_list), 4):
+            proc_list.append(process.Subprocess(
+                ['./Prefetch.py'] + path_list[idx:idx + 4],
+                stdout=process.Subprocess.STREAM))
+
+        for proc in proc_list:
+            yield proc.stdout.read_bytes(2)
+
+    @gen.coroutine
     def start(self):
         self.chal_path = 'container/standard/home/%d'%self.uniqid
         os.mkdir(self.chal_path, mode=0o711)
+
+        yield self.prefetch()
 
         if self.comp_typ in ['g++', 'clang++']:
             ret = yield self.comp_cxx()
@@ -59,20 +80,6 @@ class StdChal:
         if ret != PyExt.DETECT_NONE:
             shutil.rmtree(self.chal_path)
             return [(0, 0, STATUS_CE)] * len(self.test_list)
-
-        prefetch_proc = []
-        for test in self.test_list:
-            prefetch_proc.append(process.Subprocess(
-                ['./Prefetch.py', test['in']],
-                stdout=process.Subprocess.STREAM))
-            prefetch_proc.append(process.Subprocess(
-                ['./Prefetch.py', test['ans']],
-                stdout=process.Subprocess.STREAM))
-
-        prefetch_future = []
-        for proc in prefetch_proc:
-            prefetch_future.append(proc.stdout.read_bytes(2))
-        yield gen.multi(prefetch_future)
 
         test_future = []
         for test in self.test_list:
