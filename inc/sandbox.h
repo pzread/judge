@@ -113,11 +113,16 @@ class Sandbox {
 
     public:
 	static void update_sandboxes(siginfo_t *siginfo);
+
 	Sandbox(const std::string &_exe_path,
 	    const std::vector<std::string> &_argv,
 	    const std::vector<std::string> &_envp,
 	    const SandboxConfig &_config);
-	~Sandbox();
+	~Sandbox() noexcept;
+	Sandbox(const Sandbox &other) = delete;
+	Sandbox(Sandbox &&other) noexcept = delete;
+	Sandbox& operator=(const Sandbox &other) = delete;
+	Sandbox& operator=(Sandbox &&other) noexcept = delete;
 	void start(func_sandbox_stop_callback _stop_callback);
 	void terminate();
 };
