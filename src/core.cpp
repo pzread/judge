@@ -67,7 +67,7 @@ static void sandbox_stop_callback(unsigned long id) {
     delete task.sdbx;
     task_map.erase(task_it);
 
-    INFO("Task finished.\n");
+    INFO("Task %lu finished.\n", id);
 }
 
 unsigned long core_create_task(
@@ -107,5 +107,7 @@ int core_start_task(
 	task_map.erase(task_it);
 	return -1;
     }
+
+    INFO("Task %lu started.\n", id);
     return 0;
 }

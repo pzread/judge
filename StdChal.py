@@ -32,7 +32,7 @@ class StdChal:
 
         StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
 
-    def __init__(self, code_path, comp_typ, res_path, test_list):
+    def __init__(self, chal_id, code_path, comp_typ, res_path, test_list):
         StdChal.last_uniqid += 1
         self.uniqid = StdChal.last_uniqid
         self.code_path = code_path
@@ -40,6 +40,7 @@ class StdChal:
         self.comp_typ = comp_typ
         self.test_list = test_list
         self.chal_path = None
+        self.chal_id = chal_id
 
         StdChal.last_compile_uid += 1
         self.compile_uid = StdChal.last_compile_uid
@@ -66,10 +67,14 @@ class StdChal:
 
     @gen.coroutine
     def start(self):
+        print('StdChal %d started'%self.chal_id)
+
         self.chal_path = 'container/standard/home/%d'%self.uniqid
         os.mkdir(self.chal_path, mode=0o711)
 
         yield self.prefetch()
+
+        print('StdChal %d prefetched'%self.chal_id)
 
         if self.comp_typ in ['g++', 'clang++']:
             ret = yield self.comp_cxx()
@@ -80,6 +85,8 @@ class StdChal:
         if ret != PyExt.DETECT_NONE:
             shutil.rmtree(self.chal_path)
             return [(0, 0, STATUS_CE)] * len(self.test_list)
+
+        print('StdChal %d compiled'%self.chal_id)
 
         test_future = []
         for test in self.test_list:
@@ -109,6 +116,8 @@ class StdChal:
             ret_result.append((runtime, peakmem, status))
 
         shutil.rmtree(self.chal_path)
+
+        print('StdChal %d done'%self.chal_id)
         return ret_result
             
     @concurrent.return_future
