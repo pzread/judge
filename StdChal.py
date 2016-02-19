@@ -1,7 +1,7 @@
 import os
 import shutil
 import mmap
-from tornado import gen, concurrent
+from tornado import gen, concurrent, process
 from tornado.ioloop import IOLoop
 import PyExt
 import Config
@@ -57,9 +57,9 @@ class StdChal:
 
         path_list = list(path_set)
         proc_list = []
-        for idx in range(0, len(path_list), 4):
+        for idx in range(0, len(path_list), 16):
             proc_list.append(process.Subprocess(
-                ['./Prefetch.py'] + path_list[idx:idx + 4],
+                ['./Prefetch.py'] + path_list[idx:idx + 16],
                 stdout=process.Subprocess.STREAM))
 
         for proc in proc_list:
@@ -72,8 +72,8 @@ class StdChal:
         self.chal_path = 'container/standard/home/%d'%self.uniqid
         os.mkdir(self.chal_path, mode=0o711)
 
-        #yield self.prefetch()
-        #print('StdChal %d prefetched'%self.chal_id)
+        yield self.prefetch()
+        print('StdChal %d prefetched'%self.chal_id)
 
         if self.comp_typ in ['g++', 'clang++']:
             ret = yield self.comp_cxx()
