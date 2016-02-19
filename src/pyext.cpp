@@ -18,10 +18,6 @@
 
 #define MAXEVENTS 1024
 
-struct eventpair {
-    int fd;
-    int events;
-};
 struct taskstat {
     unsigned long utime;
     unsigned long stime;
@@ -30,31 +26,14 @@ struct taskstat {
 };
 typedef void (*func_pyext_stop_callback)(unsigned long id, taskstat stat);
 
-static int evt_memfd;
-static void *evt_mmap;
 static std::unordered_map<int, ev_header*> poll_map;
 
 extern "C" __attribute__((visibility("default"))) int init() {
     if(core_init()) {
 	return -1;
     }
-
-    if((evt_memfd = shm_open("/hypex_evt", O_RDWR | O_CREAT | O_TRUNC,
-	0600)) < 0) {
-	return -1;
-    }
-    assert(sizeof(eventpair) * MAXEVENTS == 8192);
-    if(ftruncate(evt_memfd, sizeof(eventpair) * MAXEVENTS)) {
-	return -1;
-    }
-    if((evt_mmap = mmap(NULL, sizeof(eventpair) * MAXEVENTS,
-	PROT_READ | PROT_WRITE, MAP_SHARED, evt_memfd, 0)) == NULL) {
-	return -1;
-    }
-
     poll_map.clear();
-
-    return evt_memfd;
+    return 0;
 }
 
 extern "C" __attribute__((visibility("default")))
@@ -91,18 +70,18 @@ int ext_modify(int fd, int events) {
 }
 
 extern "C" __attribute__((visibility("default")))
-int ext_poll(long timeout) {
-    int i;
+int ext_poll(ev_pollpair pollpairs[], int timeout) {
     int num;
-    eventpair *ret = (eventpair*)evt_mmap;
-
-    num = ev_poll(core_evdata, (int)timeout);
-
-    for(i = 0;i < num && i < MAXEVENTS;i++) {
-	ret[i].fd = core_evdata->polls[i].fd;
-	ret[i].events = core_evdata->polls[i].events;
+    int i;
+    
+    if((num = ev_poll(core_evdata, timeout)) < 0) {
+	return 0;
     }
-    return i;
+    for(i = 0;i < num;i++) {
+	pollpairs[i].fd = core_evdata->polls[i].fd;
+	pollpairs[i].events = core_evdata->polls[i].events;
+    }
+    return num;
 }
 
 extern "C" __attribute__((visibility("default")))

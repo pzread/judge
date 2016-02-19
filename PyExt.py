@@ -1,5 +1,3 @@
-import mmap
-import struct
 from cffi import FFI
 from collections import deque
 from tornado.ioloop import IOLoop
@@ -16,7 +14,6 @@ DETECT_FORCETIMEOUT = 3
 DETECT_EXITERR = 4
 DETECT_INTERNALERR = 5
 
-
 ffi = None
 pyextlib = None
 task_stop_cb = None
@@ -32,8 +29,7 @@ class UvPoll:
 
         self.ffi = ffi
         self.pyextlib = pyextlib
-        self.maxevts = 1024
-        #self.evts = self.ffi.new('eventpair[]', self.maxevts)
+        self.pollpairs = self.ffi.new('pollpair[]', 65536)
 
     def close(self):
         raise NotImplemented()
@@ -47,15 +43,16 @@ class UvPoll:
     def modify(self, fd, events):
         self.pyextlib.ext_modify(fd, events)
 
-    def poll(self, timeout, maxevts = 1024):
-        global evt_mmap
+    def poll(self, timeout, maxevts = 65536):
+        assert(maxevts <= 65536)
 
-        assert(maxevts <= self.maxevts)
-        num = self.pyextlib.ext_poll(int(timeout * 1000))
+        num = self.pyextlib.ext_poll(self.pollpairs, int(timeout * 1000))
         pairs = list()
         for idx in range(num):
-            fd, events = struct.unpack('II', evt_mmap[idx * 8:idx * 8 + 8])
-            pairs.append((fd, events))
+            pairs.append((
+                int(self.pollpairs[idx].fd),
+                int(self.pollpairs[idx].events)
+            ))
 
         return pairs
 
@@ -64,17 +61,15 @@ def init():
     global ffi
     global pyextlib
     global task_stop_cb
-    global evt_mmap
+    global evt_pollpairs
 
     ffi = FFI()
-    """
     ffi.cdef('''
         typedef struct {
             int fd;
-            int events;
-        } eventpair;
+            uint32_t events;
+        } pollpair;
     ''')
-    """
     ffi.cdef('''
         struct taskstat {
             unsigned long utime;
@@ -83,12 +78,11 @@ def init():
             int detect_error;
         };
     ''')
-
     ffi.cdef('''int init();''')
     ffi.cdef('''int ext_register(int fd, int events);''')
     ffi.cdef('''int ext_unregister(int fd);''')
     ffi.cdef('''int ext_modify(int fd, int events);''')
-    ffi.cdef('''int ext_poll(long timeout);''')
+    ffi.cdef('''int ext_poll(pollpair[], int timeout);''')
     ffi.cdef('''unsigned long create_task(
         char exe_path[], char *argv[], char *envp[], 
         int stdin_fd, int stdout_fd, int stderr_fd, 
@@ -98,12 +92,9 @@ def init():
         int restrict_level);''')
     ffi.cdef('''int start_task(unsigned long id,
         void (*callback)(unsigned long id, struct taskstat stat));''')
-    pyextlib = ffi.dlopen('lib/libpyext.so')
 
-    memfd = pyextlib.init()
-    assert(memfd >= 0)
-    evt_mmap = mmap.mmap(
-        memfd, 8192, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ)
+    pyextlib = ffi.dlopen('lib/libpyext.so')
+    pyextlib.init()
 
     @ffi.callback('void(unsigned long, struct taskstat)')
     def task_stop_cb(task_id, stat):

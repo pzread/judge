@@ -60,7 +60,7 @@ int ev_poll(struct ev_data *evdata,int timeout){
     struct epoll_event *evt;
     struct ev_header *evhdr;
 
-    if((evtc = epoll_wait(evdata->epfd,evts,EVPOOL_SIZE,timeout)) < 0){
+    if((evtc = epoll_wait(evdata->epfd, evts, EVPOOL_SIZE, timeout)) < 0){
         return -1;        
     }
 
