@@ -3,6 +3,7 @@
 
 #include<vector>
 #include<string>
+#include<memory>
 #include<exception>
 #include<unordered_map>
 #include<queue>
@@ -10,8 +11,8 @@
 #include<limits.h>
 #include<sys/signal.h>
 #include<libcgroup.h>
-#include<uv.h>
 
+#include"ev.h"
 #include"utils.h"
 
 class Sandbox;
@@ -20,6 +21,11 @@ enum sandbox_restrict_level {
     SANDBOX_RESTRICT_HIGH = 1,
 };
 typedef void (*func_sandbox_stop_callback)(unsigned long id);
+
+struct sandbox_evpair {
+    ev_header hdr;
+    unsigned long id;
+};
 
 class SandboxException : public std::exception {
     private:
@@ -49,6 +55,7 @@ class SandboxConfig {
 	unsigned long memlimit;
 	sandbox_restrict_level restrict_level;
 };
+
 class SandboxStat {
     public:
 	unsigned long utime;
@@ -67,10 +74,11 @@ class SandboxStat {
 	    detect_error(SANDBOX_STAT_NONE) {}
 };
 
-class Sandbox {
+class Sandbox : public std::enable_shared_from_this<Sandbox> {
     private:
 	static unsigned long last_sandbox_id;
-	static std::unordered_map<pid_t, Sandbox*> run_map;
+	static std::unordered_map<pid_t, std::shared_ptr<Sandbox>> sandbox_map;
+	static std::unordered_map<pid_t, unsigned long> run_map;
 
 	enum {
 	    SANDBOX_STATE_INIT,
@@ -86,22 +94,19 @@ class Sandbox {
 	std::vector<std::string> envp;
 	SandboxConfig config;
 
-	struct cgroup *cg;
-	struct cgroup_controller *memcg;
-	int memevt_fd;
-	uv_poll_t *memevt_uvpoll;
-	uv_timer_t *force_uvtimer;
+	cgroup *cg;
+	cgroup_controller *memcg;
+	sandbox_evpair *memevt_poll;
+	sandbox_evpair *forcetime_poll;
 	int execve_count;
-
 
     public:
 	unsigned long id;
 	SandboxStat stat;
 
     private:
-	static void memevt_uvpoll_callback(uv_poll_t *uvpoll,
-	    int status, int events);
-	static void force_uvtimer_callback(uv_timer_t *uvtimer);
+	static void memevt_handler(ev_header *hdr, uint32_t events);
+	static void forcetime_handler(ev_header *hdr, uint32_t events);
 	static int sandbox_entry(void *data);
 
 	int install_limit() const;

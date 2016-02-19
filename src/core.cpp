@@ -6,30 +6,20 @@
 #include<unordered_map>
 #include<queue>
 #include<memory>
-#include<uv.h>
 
+#include"ev.h"
 #include"utils.h"
 #include"core.h"
 #include"sandbox.h"
 
-static uv_loop_t uvloop_instance;
-uv_loop_t *core_uvloop = &uvloop_instance;
+ev_data *core_evdata;
 
-static uv_timer_t defer_uvtimer;
-static std::queue<std::pair<func_core_defer_callback, void*>> defer_queue;
 static std::unordered_map<unsigned long, Task> task_map;
 
-static void defer_uvtimer_callback(uv_timer_t *uvtimer) {
-    while(!defer_queue.empty()) {
-	auto defer = defer_queue.front();
-	defer_queue.pop();
-	defer.first(defer.second);
-    }
-}
-
 int core_init() {
-    uv_loop_init(core_uvloop);   
-    uv_timer_init(core_uvloop, &defer_uvtimer);
+    core_evdata = new ev_data();
+    ev_init(core_evdata);
+
     task_map.clear();
 
     try {
@@ -42,20 +32,6 @@ int core_init() {
     return 0;
 }
 
-int core_poll(bool nowait) {
-    if(nowait) {
-	return uv_run(core_uvloop, UV_RUN_NOWAIT);
-    } else {
-	return uv_run(core_uvloop, UV_RUN_ONCE);
-    }
-}
-
-int core_defer(func_core_defer_callback callback, void *data) {
-    defer_queue.emplace(std::make_pair(callback, data));
-    uv_timer_start(&defer_uvtimer, defer_uvtimer_callback, 0, 0);
-    return 0;
-}
-
 static void sandbox_stop_callback(unsigned long id) {
     auto task_it = task_map.find(id);
     assert(task_it != task_map.end());
@@ -64,7 +40,6 @@ static void sandbox_stop_callback(unsigned long id) {
     assert(task.callback != NULL);
     task.callback(id, task.sdbx->stat, task.data);
 
-    delete task.sdbx;
     task_map.erase(task_it);
 
     INFO("Task %lu finished.\n", id);
@@ -77,8 +52,8 @@ unsigned long core_create_task(
     const SandboxConfig &config
 ) {
     try {
-	auto sdbx = new Sandbox(exe_path, argv, envp, config);
-	task_map.insert(std::make_pair(sdbx->id, Task(sdbx, NULL, NULL)));
+	auto sdbx = std::make_shared<Sandbox>(exe_path, argv, envp, config);
+	task_map.emplace(std::make_pair(sdbx->id, Task(sdbx, NULL, NULL)));
 	return sdbx->id;
     } catch(SandboxException &e) {
 	return 0;
@@ -96,14 +71,13 @@ int core_start_task(
     if(task_it == task_map.end()) {
 	return -1;
     }
-    auto &task = task_it->second;
-    task.callback = callback;
-    task.data = data;
+    task_it->second.callback = callback;
+    task_it->second.data = data;
 
+    Task task = task_it->second;
     try{
 	task.sdbx->start(sandbox_stop_callback);
     } catch(SandboxException &e) {
-	delete task.sdbx;
 	task_map.erase(task_it);
 	return -1;
     }

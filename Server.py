@@ -78,7 +78,7 @@ class JudgeHandler(WebSocketHandler):
             JudgeHandler.chal_queue.append((obj, ws))
 
         while len(JudgeHandler.chal_queue) > 0 \
-            and JudgeHandler.chal_running_count < Config.CHAL_MAXCONCURRENT:
+            and JudgeHandler.chal_running_count < Config.TASK_MAXCONCURRENT:
             chal = JudgeHandler.chal_queue.popleft()
             JudgeHandler.chal_running_count += 1
             IOLoop.instance().add_callback(JudgeHandler.start_chal, *chal)
@@ -86,9 +86,72 @@ class JudgeHandler(WebSocketHandler):
     def open(self): 
         pass 
 
-    def on_message(self,msg): 
-        obj = json.loads(msg,'utf-8')
+    def on_message(self, msg): 
+        obj = json.loads(msg, 'utf-8')
         JudgeHandler.emit_chal(obj, self)
+
+        '''
+        chal_id = obj['chal_id']
+        code_path = '/srv/nfs' + obj['code_path'][4:]
+        test_list = obj['testl']
+        res_path = '/srv/nfs' + obj['res_path'][4:]
+
+        test_paramlist = list()
+        comp_type = test_list[0]['comp_type']
+        assert(comp_type in ['g++', 'clang++', 'makefile'])
+
+        for test in test_list:
+            assert(test['comp_type'] == comp_type)
+            assert(test['check_type'] == 'diff')
+            test_idx = test['test_idx']
+            memlimit = test['memlimit']
+            timelimit = test['timelimit']
+            data_ids = test['metadata']['data']
+            for data_id in data_ids:
+                test_paramlist.append({
+                    'in': res_path + '/testdata/%d.in'%data_id,
+                    'ans': res_path + '/testdata/%d.out'%data_id,
+                    'timelimit': timelimit,
+                    'memlimit': memlimit,
+                })
+        '''
+        '''
+        tests = []
+        for i in range(4):
+            tests.append({
+                'in': '/srv/nfs/oj/backend/problem/213/res/testdata/%d.in'%(i + 1),
+                'ans': '/srv/nfs/oj/backend/problem/213/res/testdata/%d.out'%(i + 1),
+                'timelimit': 1500,
+                'memlimit': 128 * 1024 * 1024,
+            })
+        chal = StdChal(chal_id, '/srv/nfs/oj/backend/code/37795/main.cpp', 'g++', '/srv/nfs/oj/backend/problem/213/res', tests)
+
+        print(chal_id)
+        chal = StdChal(chal_id, code_path, comp_type, res_path, test_paramlist)
+        result_list = yield chal.start()
+
+        idx = 0
+        for test in test_list:
+            test_idx = test['test_idx']
+            data_ids = test['metadata']['data']
+            total_runtime = 0
+            total_mem = 0
+            total_status = 0
+            for data_id in data_ids:
+                runtime, peakmem, status = result_list[idx]
+                total_runtime += runtime
+                total_mem += peakmem
+                total_status = max(total_status, status)
+                idx += 1
+
+            self.write_message(json.dumps({
+                'chal_id': chal_id,
+                'test_idx': test_idx,
+                'state': total_status,
+                'runtime': total_runtime,
+                'memory': total_mem,
+            }))
+        '''
 
     def on_close(self): 
         pass

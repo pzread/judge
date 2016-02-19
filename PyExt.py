@@ -1,3 +1,5 @@
+import mmap
+import struct
 from cffi import FFI
 from collections import deque
 from tornado.ioloop import IOLoop
@@ -24,51 +26,36 @@ task_running_count = 0
 
 
 class UvPoll:
-    UV_READABLE = 1
-    UV_WRITEABLE = 2
-
     def __init__(self):
         global ffi
         global pyextlib
 
         self.ffi = ffi
         self.pyextlib = pyextlib
+        self.maxevts = 1024
+        #self.evts = self.ffi.new('eventpair[]', self.maxevts)
 
     def close(self):
         raise NotImplemented()
 
-    def evt_to_uvevt(self, events):
-        uv_events = 0
-        if (events & IOLoop.READ) == IOLoop.READ:
-            uv_events |= UvPoll.UV_READABLE
-        if (events & IOLoop.WRITE) == IOLoop.WRITE:
-            uv_events |= UvPoll.UV_WRITEABLE
-        return uv_events
-
     def register(self, fd, events):
-        self.pyextlib.ev_register(fd, self.evt_to_uvevt(events))
+        self.pyextlib.ext_register(fd, events)
 
     def unregister(self, fd):
-        self.pyextlib.ev_unregister(fd)
+        self.pyextlib.ext_unregister(fd)
 
     def modify(self, fd, events):
-        self.pyextlib.ev_modify(fd, self.evt_to_uvevt(events))
+        self.pyextlib.ext_modify(fd, events)
 
-    def poll(self, timeout, maxevts = 256):
-        evts = self.ffi.new('eventpair[]', maxevts)
-        num = self.pyextlib.ev_poll(int(timeout * 1000), evts, maxevts)
+    def poll(self, timeout, maxevts = 1024):
+        global evt_mmap
+
+        assert(maxevts <= self.maxevts)
+        num = self.pyextlib.ext_poll(int(timeout * 1000))
         pairs = list()
         for idx in range(num):
-            evt = evts[idx]
-            if evt.events < 0:
-                events = IOLoop.ERROR
-            else:
-                events = 0
-                if evt.events & UvPoll.UV_READABLE:
-                    events |= IOLoop.READ
-                if evt.events & UvPoll.UV_WRITEABLE:
-                    events |= IOLoop.WRITE
-            pairs.append((evt.fd, events))
+            fd, events = struct.unpack('II', evt_mmap[idx * 8:idx * 8 + 8])
+            pairs.append((fd, events))
 
         return pairs
 
@@ -77,14 +64,17 @@ def init():
     global ffi
     global pyextlib
     global task_stop_cb
+    global evt_mmap
 
     ffi = FFI()
+    """
     ffi.cdef('''
         typedef struct {
             int fd;
             int events;
         } eventpair;
     ''')
+    """
     ffi.cdef('''
         struct taskstat {
             unsigned long utime;
@@ -95,22 +85,25 @@ def init():
     ''')
 
     ffi.cdef('''int init();''')
-    ffi.cdef('''int ev_register(int fd, int events);''')
-    ffi.cdef('''int ev_unregister(int fd);''')
-    ffi.cdef('''int ev_modify(int fd, int events);''')
-    ffi.cdef('''int ev_poll(long timeout, eventpair ret[], int maxevts);''')
+    ffi.cdef('''int ext_register(int fd, int events);''')
+    ffi.cdef('''int ext_unregister(int fd);''')
+    ffi.cdef('''int ext_modify(int fd, int events);''')
+    ffi.cdef('''int ext_poll(long timeout);''')
     ffi.cdef('''unsigned long create_task(
-        char exe_path[], char *argv[], char *envp[],
-        int stdin_fd, int stdout_fd, int stderr_fd,
-        char work_path[], char root_path[],
-        unsigned int uid, unsigned int gid,
-        unsigned long timelimit, unsigned long memlimit,
+        char exe_path[], char *argv[], char *envp[], 
+        int stdin_fd, int stdout_fd, int stderr_fd, 
+        char work_path[], char root_path[], 
+        unsigned int uid, unsigned int gid, 
+        unsigned long timelimit, unsigned long memlimit, 
         int restrict_level);''')
-    ffi.cdef('''int start_task(
-        unsigned long id,
+    ffi.cdef('''int start_task(unsigned long id,
         void (*callback)(unsigned long id, struct taskstat stat));''')
     pyextlib = ffi.dlopen('lib/libpyext.so')
-    pyextlib.init()
+
+    memfd = pyextlib.init()
+    assert(memfd >= 0)
+    evt_mmap = mmap.mmap(
+        memfd, 8192, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ)
 
     @ffi.callback('void(unsigned long, struct taskstat)')
     def task_stop_cb(task_id, stat):
@@ -124,10 +117,10 @@ def init():
             callback,
             task_id,
             {
-                'utime': stat.utime,
-                'stime': stat.stime,
-                'peakmem': stat.peakmem,
-                'detect_error': stat.detect_error,
+                'utime': int(stat.utime),
+                'stime': int(stat.stime),
+                'peakmem': int(stat.peakmem),
+                'detect_error': int(stat.detect_error),
             }
         )
 
@@ -153,7 +146,6 @@ def create_task(
     global ffi
     global pyextlib
 
-    ffi_exe_path = ffi.new('char[]', exe_path.encode('utf-8'))
     ffi_argv = []
     for arg in argv:
         ffi_argv.append(ffi.new('char[]', arg.encode('utf-8')))
@@ -164,11 +156,12 @@ def create_task(
         ffi_envp.append(ffi.new('char[]', env.encode('utf-8')))
     ffi_envp.append(ffi.NULL)
 
-    ffi_work_path = ffi.new('char[]', work_path.encode('utf-8'))
-    ffi_root_path = ffi.new('char[]', root_path.encode('utf-8'))
-
-    task_id = pyextlib.create_task(ffi_exe_path, ffi_argv, ffi_envp,
-        stdin_fd, stdout_fd, stderr_fd, ffi_work_path, ffi_root_path,
+    task_id = pyextlib.create_task(
+        ffi.new('char[]', exe_path.encode('utf-8')),
+        ffi_argv, ffi_envp,
+        stdin_fd, stdout_fd, stderr_fd,
+        ffi.new('char[]', work_path.encode('utf-8')),
+        ffi.new('char[]', root_path.encode('utf-8')),
         uid, gid, timelimit, memlimit, restrict_level)
 
     if task_id == 0:
@@ -196,7 +189,7 @@ def emit_task():
         and task_running_count < Config.TASK_MAXCONCURRENT:
         task_id = task_queue.popleft()
         task_running_count += 1
-        _, started_callback = task_map[task_id]
+        callback, started_callback = task_map[task_id]
 
         pyextlib.start_task(task_id, task_stop_cb)
 

@@ -1,16 +1,22 @@
 #define LOG_PREFIX "pyext"
 
+#include<cstring>
 #include<cassert>
 #include<csignal>
 #include<queue>
 #include<vector>
 #include<unordered_map>
+#include<fcntl.h>
 #include<pwd.h>
-#include<uv.h>
+#include<sys/mman.h>
+#include<sys/stat.h>
 
+#include"ev.h"
 #include"utils.h"
 #include"core.h"
 #include"sandbox.h"
+
+#define MAXEVENTS 1024
 
 struct eventpair {
     int fd;
@@ -24,82 +30,77 @@ struct taskstat {
 };
 typedef void (*func_pyext_stop_callback)(unsigned long id, taskstat stat);
 
-static uv_timer_t poll_uvtimer;
-static std::unordered_map<int, uv_poll_t*> poll_map;
-static std::queue<std::pair<int, int>> pend_events;
-
-static void uvpoll_callback(uv_poll_t *uvpoll, int status, int events) {
-    int fd;
-
-    uv_fileno((uv_handle_t*)uvpoll, &fd);
-    if(status == 0) {
-	pend_events.emplace(fd, events);
-    } else {
-	pend_events.emplace(fd, status);
-    }
-}
-static void timeout_uvtimer_callback(uv_timer_t *uvtimer) {
-    uv_stop(core_uvloop);
-}
+static int evt_memfd;
+static void *evt_mmap;
+static std::unordered_map<int, ev_header*> poll_map;
 
 extern "C" __attribute__((visibility("default"))) int init() {
     if(core_init()) {
 	return -1;
     }
-    poll_map.clear();
-    while(!pend_events.empty()) {
-	pend_events.pop();
+
+    if((evt_memfd = shm_open("/hypex_evt", O_RDWR | O_CREAT | O_TRUNC,
+	0600)) < 0) {
+	return -1;
     }
-    uv_timer_init(core_uvloop, &poll_uvtimer);
-    return 0;
+    assert(sizeof(eventpair) * MAXEVENTS == 8192);
+    if(ftruncate(evt_memfd, sizeof(eventpair) * MAXEVENTS)) {
+	return -1;
+    }
+    if((evt_mmap = mmap(NULL, sizeof(eventpair) * MAXEVENTS,
+	PROT_READ | PROT_WRITE, MAP_SHARED, evt_memfd, 0)) == NULL) {
+	return -1;
+    }
+
+    poll_map.clear();
+
+    return evt_memfd;
 }
 
 extern "C" __attribute__((visibility("default")))
-int ev_register(int fd, int events) {
-    assert(poll_map.find(fd) == poll_map.end());
+int ext_register(int fd, int events) {
+    auto poll_it = poll_map.find(fd);
+    ev_header *evhdr;
 
-    auto uvpoll = new uv_poll_t;
-    uv_poll_init(core_uvloop, uvpoll, fd);
-    poll_map[fd] = uvpoll;
-    uv_poll_start(uvpoll, events, uvpoll_callback);
-    return 0;
-}
-extern "C" __attribute__((visibility("default")))
-int ev_unregister(int fd) {
-    assert(poll_map.find(fd) != poll_map.end());
+    if(poll_it == poll_map.end()) {
+	evhdr = new ev_header();
+	evhdr->fd = fd;
+	evhdr->handler = NULL;
+	poll_map[fd] = evhdr;
+    } else {
+	evhdr = poll_it->second;
+    }
 
-    uv_poll_t *uvpoll = poll_map[fd];
-    uv_poll_stop(uvpoll);
-    poll_map.erase(fd);
-    delete uvpoll;
-    return 0;
+    return ev_register(evhdr, events);
 }
-extern "C" __attribute__((visibility("default")))
-int ev_modify(int fd, int events) {
-    assert(poll_map.find(fd) != poll_map.end());
 
-    uv_poll_start(poll_map[fd], events, uvpoll_callback);
-    return 0;
-}
 extern "C" __attribute__((visibility("default")))
-int ev_poll(long timeout, eventpair ret[], int maxevts) {
+int ext_unregister(int fd) {
+    auto poll_it = poll_map.find(fd);
+    assert(poll_it != poll_map.end());
+
+    return ev_unregister(poll_it->second);
+}
+
+extern "C" __attribute__((visibility("default")))
+int ext_modify(int fd, int events) {
+    auto poll_it = poll_map.find(fd);
+    assert(poll_it != poll_map.end());
+
+    return ev_modify(poll_it->second, events);
+}
+
+extern "C" __attribute__((visibility("default")))
+int ext_poll(long timeout) {
     int i;
+    int num;
+    eventpair *ret = (eventpair*)evt_mmap;
 
-    uv_timer_start(&poll_uvtimer, timeout_uvtimer_callback, timeout, 0);
-    core_poll(false);
-    uv_timer_stop(&poll_uvtimer);
+    num = ev_poll(core_evdata, (int)timeout);
 
-    i = 0;
-    while(!pend_events.empty()) {
-	if(i >= maxevts) {
-	    break;
-	}
-	auto evt = pend_events.front();
-	pend_events.pop();
-
-	ret[i].fd = evt.first;
-	ret[i].events = evt.second;
-	i += 1;
+    for(i = 0;i < num && i < MAXEVENTS;i++) {
+	ret[i].fd = core_evdata->polls[i].fd;
+	ret[i].events = core_evdata->polls[i].events;
     }
     return i;
 }
@@ -134,7 +135,7 @@ unsigned long create_task(
 
     config.stdin_fd = stdin_fd;
     config.stdout_fd = stdout_fd;
-    config.stderr_fd = stderr_fd;
+    config.stderr_fd = stdout_fd;
     config.work_path = work_path;
     config.root_path = root_path;
     config.uid = uid;
@@ -161,14 +162,14 @@ static void stop_task_callback(
     const SandboxStat &stat,
     void *data
 ) {
-    taskstat tstat;
+    taskstat pystat;
     auto callback = (func_pyext_stop_callback)data;
 
-    tstat.utime = stat.utime;
-    tstat.stime = stat.stime;
-    tstat.peakmem = stat.peakmem;
-    tstat.detect_error = (int)stat.detect_error;
-    callback(id, tstat);
+    pystat.utime = stat.utime;
+    pystat.stime = stat.stime;
+    pystat.peakmem = stat.peakmem;
+    pystat.detect_error = (int)stat.detect_error;
+    callback(id, pystat);
 }
 
 extern "C" __attribute__((visibility("default")))

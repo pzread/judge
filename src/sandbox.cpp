@@ -6,10 +6,13 @@
 #include<cstddef>
 #include<cerrno>
 #include<cstring>
+#include<cassert>
 #include<unordered_map>
 #include<queue>
+#include<memory>
 #include<unistd.h>
 #include<sched.h>
+#include<fcntl.h>
 #include<grp.h>
 #include<sys/wait.h>
 #include<sys/time.h>
@@ -19,20 +22,26 @@
 #include<sys/signal.h>
 #include<sys/user.h>
 #include<sys/eventfd.h>
+#include<sys/timerfd.h>
+#include<sys/signalfd.h>
 #include<sys/resource.h>
 #include<linux/seccomp.h>
 #include<linux/filter.h>
 #include<linux/audit.h>
 #include<libcgroup.h>
-#include<uv.h>
 
+#include"ev.h"
 #include"utils.h"
 #include"sandbox.h"
 #include"core.h"
 
-static uv_signal_t sigchld_uvsig;
+static int sigchld_sigfd;
+static ev_header *sigchld_evhdr;
 
-static void sigchld_callback(uv_signal_t *uvsig, int signo) {
+static void sigchld_callback(struct ev_header *evhdr, uint32_t events) {
+    signalfd_siginfo sigfdinfo;
+    while(read(sigchld_sigfd, &sigfdinfo, sizeof(sigfdinfo)) > 0) {}
+
     siginfo_t siginfo;
     siginfo.si_pid = 0;
     while(!waitid(P_ALL, 0, &siginfo,
@@ -45,13 +54,24 @@ static void sigchld_callback(uv_signal_t *uvsig, int signo) {
 }
 
 void sandbox_init() {
+    sigset_t mask;
+
     cgroup_init();
-    uv_signal_init(core_uvloop, &sigchld_uvsig);
-    uv_signal_start(&sigchld_uvsig, sigchld_callback, SIGCHLD);
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    sigchld_sigfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+    sigprocmask(SIG_BLOCK, &mask, NULL);
+
+    sigchld_evhdr = new ev_header();
+    sigchld_evhdr->fd = sigchld_sigfd;
+    sigchld_evhdr->handler = sigchld_callback;
+    ev_register(sigchld_evhdr, EPOLLIN);
 }
 
 unsigned long Sandbox::last_sandbox_id = 0;
-std::unordered_map<int, Sandbox*> Sandbox::run_map;
+std::unordered_map<pid_t, std::shared_ptr<Sandbox>> Sandbox::sandbox_map;
+std::unordered_map<int, unsigned long> Sandbox::run_map;
 
 Sandbox::Sandbox(const std::string &_exe_path,
     const std::vector<std::string> &_argv,
@@ -70,13 +90,16 @@ Sandbox::Sandbox(const std::string &_exe_path,
     char oom_path[PATH_MAX + 1];
     int oom_fd;
     char memevt_param[256];
+    int memevt_fd;
+    int forcetime_fd;
 
     cg = NULL;
     memcg = NULL;
     oom_fd = -1;
     memevt_fd = -1;
-    memevt_uvpoll = NULL;
-    force_uvtimer = NULL;
+    forcetime_fd = -1;
+    memevt_poll = NULL;
+    forcetime_poll = NULL;
 
     try{ 
 	snprintf(cg_name, sizeof(cg_name), "hypex_%lu", id);
@@ -118,30 +141,41 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	close(oom_fd);
 	oom_fd = -1;
 
-	memevt_uvpoll = new uv_poll_t();
-	uv_poll_init(core_uvloop, memevt_uvpoll, memevt_fd);
-	((uv_handle_t*)memevt_uvpoll)->data = this;
-	uv_poll_start(memevt_uvpoll, UV_READABLE, memevt_uvpoll_callback);
+	if((forcetime_fd = timerfd_create(CLOCK_MONOTONIC,
+	    TFD_NONBLOCK | TFD_CLOEXEC)) < 0) {
+	    throw SandboxException("Set force timer failed.");
+	}
 
-	force_uvtimer = new uv_timer_t();
-	uv_timer_init(core_uvloop, force_uvtimer);
-	((uv_handle_t*)force_uvtimer)->data = this;
+	memevt_poll = new sandbox_evpair();
+	memevt_poll->hdr.fd = memevt_fd;
+	memevt_poll->hdr.handler = memevt_handler;
+	memevt_poll->id = id;
+	forcetime_poll = new sandbox_evpair();
+	forcetime_poll->hdr.fd = forcetime_fd;
+	forcetime_poll->hdr.handler = forcetime_handler;
+	forcetime_poll->id = id;
+	ev_register(&memevt_poll->hdr, EPOLLIN);
+	ev_register(&forcetime_poll->hdr, EPOLLIN);
 
 	execve_count = 0;
 
     } catch(SandboxException &e) {
-	if(memevt_uvpoll != NULL) {
-	    delete memevt_uvpoll;
-	    uv_poll_stop(memevt_uvpoll);
-	}
-	if(force_uvtimer != NULL) {
-	    delete force_uvtimer;
-	}
 	if(oom_fd >= 0) {
 	    close(oom_fd);
 	}
 	if(memevt_fd >= 0) {
 	    close(memevt_fd);
+	}
+	if(memevt_poll != NULL) {
+	    ev_unregister(&memevt_poll->hdr);
+	    delete memevt_poll;
+	}
+	if(forcetime_fd >= 0) {
+	    close(forcetime_fd);
+	}
+	if(forcetime_poll != NULL) {
+	    ev_unregister(&forcetime_poll->hdr);
+	    delete forcetime_poll;
 	}
         if(cg != NULL) {
 	    cgroup_delete_cgroup(cg, 1);
@@ -152,45 +186,48 @@ Sandbox::Sandbox(const std::string &_exe_path,
 }
 
 Sandbox::~Sandbox() {
-    uv_poll_stop(memevt_uvpoll);
-    delete memevt_uvpoll;
-    delete force_uvtimer;
-    close(memevt_fd);
+    ev_unregister(&memevt_poll->hdr);
+    close(memevt_poll->hdr.fd);
+    delete memevt_poll;
+    ev_unregister(&forcetime_poll->hdr);
+    close(forcetime_poll->hdr.fd);
+    delete forcetime_poll;
+
     cgroup_delete_cgroup(cg, 1);
     cgroup_free(&cg);
+
+    DBG("Sandbox %lu deleted\n", id);
 }
 
 void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
     stop_callback = _stop_callback;
     stat.detect_error = SandboxStat::SANDBOX_STAT_NONE;
 
+    sandbox_map[id] = shared_from_this();
+
     char *child_stack = new char[4 * 1024 * 1024];
     if((child_pid = clone(sandbox_entry, child_stack + 4 * 1024 * 1024,
 	CLONE_NEWIPC | CLONE_NEWPID | CLONE_NEWNET | CLONE_NEWNS
-	| CLONE_NEWUSER | CLONE_NEWUTS | SIGCHLD, this)) == -1) {
+	| CLONE_NEWUSER | CLONE_NEWUTS | SIGCHLD, (void*)id)) == -1) {
 	throw SandboxException("Clone failed");
     }
     delete[] child_stack;
 
-    run_map[child_pid] = this;
+    run_map[child_pid] = id;
     state = SANDBOX_STATE_PRERUN;
 }
 
 void Sandbox::stop(bool exit_error) {
     if(state == SANDBOX_STATE_PRERUN) {
-	run_map.erase(child_pid);
 	stat.detect_error = SandboxStat::SANDBOX_STAT_INTERNALERR;
-    } else if(state == SANDBOX_STATE_RUNNING) {
-	run_map.erase(child_pid);
-	uv_timer_stop(force_uvtimer);
     }
     state = SANDBOX_STATE_STOP;
 
     if(stat.detect_error == SandboxStat::SANDBOX_STAT_NONE && exit_error) {
 	stat.detect_error = SandboxStat::SANDBOX_STAT_EXITERR;
     }
-
-    core_defer((func_core_defer_callback)stop_callback, (void*)id);
+    
+    stop_callback(id);
 }
 
 void Sandbox::update_state(siginfo_t *siginfo) {
@@ -243,7 +280,7 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    fclose(f_uidmap);
 	    f_uidmap = NULL;
 	    fclose(f_gidmap);
-	    f_gidmap  =NULL;
+	    f_gidmap = NULL;
 
 	} catch(SandboxException &e) {
 	    if(f_uidmap != NULL) {
@@ -260,9 +297,16 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	}
 
 	state = SANDBOX_STATE_RUNNING;
-	//Must start timer after change state to running.
-	uv_timer_start(force_uvtimer, force_uvtimer_callback,
-	    config.timelimit * 4 + 1000, 0);
+
+	//Start timer after change state to running.
+	itimerspec ts;
+	ts.it_value.tv_sec = (config.timelimit * 10 + 1000) / 1000;
+	ts.it_value.tv_nsec = ((config.timelimit * 10 + 1000) % 1000) * 1000000;
+	ts.it_interval.tv_sec = 0;
+	ts.it_interval.tv_nsec = 0;
+	if(timerfd_settime(forcetime_poll->hdr.fd, 0, &ts, NULL)) {
+	    throw SandboxException("Start force timer failed.");
+	}
 
 	kill(child_pid, SIGCONT);
 	ptrace(PTRACE_CONT, child_pid, NULL, NULL);
@@ -311,7 +355,7 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 			!= sizeof(sigset)) {
 			throw SandboxException("Read sigprocmask failed.");
 		    }
-		    sigdelset(&sigset,SIGVTALRM);
+		    sigdelset(&sigset, SIGVTALRM);
 		    if(pwrite64(mem_fd, &sigset, sizeof(sigset), regs.rsi)
 			!= sizeof(sigset)) {
 			throw SandboxException("Write sigprocmask failed.");
@@ -466,12 +510,15 @@ int Sandbox::read_stat(
     if((stat_f = fopen(stat_path, "r")) == NULL) {
 	return -1;
     }
-    fscanf(stat_f,
+    if(fscanf(stat_f,
 	"%*d (%*[^)]) %*c %*d %*d %*d %*d %*d %*u %*d %*d %*d " \
 	"%*d %lu %lu %*d %*d %*d %*d %*d %*d %*d %*d %*d " \
 	"%*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d " \
 	"%*d %*d %*d %*u %*d %*d %*d %*d %*d %*d %*d %*d "
-	"%*d %*d %*d", utime, stime);
+	"%*d %*d %*d", utime, stime) != 2) {
+	fclose(stat_f);
+	return -1;
+    }
     fclose(stat_f);
 
     *utime = (*utime * 1000UL) / sysconf(_SC_CLK_TCK);
@@ -486,48 +533,70 @@ int Sandbox::read_stat(
     if((memuse_f = fopen(memuse_path, "r")) == NULL) {
 	return -1;
     }
-    fscanf(memuse_f, "%lu", peakmem);
+    if(fscanf(memuse_f, "%lu", peakmem) != 1) {
+	fclose(memuse_f);
+	return -1;
+    }
     fclose(memuse_f);
 
     return 0;
 }
 
 void Sandbox::update_sandboxes(siginfo_t *siginfo) {
-    auto sdbx_it = run_map.find(siginfo->si_pid);
-    if(sdbx_it != run_map.end()) {
-	Sandbox *sdbx = sdbx_it->second;
+    auto id_it = run_map.find(siginfo->si_pid);
+    if(id_it != run_map.end()) {
+	auto sdbx_it = sandbox_map.find(id_it->second);
+	assert(sdbx_it != sandbox_map.end());
+
+	std::shared_ptr<Sandbox> sdbx = sdbx_it->second;
 	try {
 	    sdbx->update_state(siginfo);
 	} catch(SandboxException &e) {
 	    sdbx->stat.detect_error = SandboxStat::SANDBOX_STAT_INTERNALERR;
 	    sdbx->terminate();   
 	}
+	if(sdbx->state == SANDBOX_STATE_STOP) {
+	    run_map.erase(id_it);
+	    sandbox_map.erase(sdbx->id);
+	}
     }
 }
 
-void Sandbox::memevt_uvpoll_callback(
-    uv_poll_t *uvpoll,
-    int status,
-    int events
-) {
-    Sandbox *sdbx = (Sandbox*)((uv_handle_t*)uvpoll)->data;
+void Sandbox::memevt_handler(ev_header *hdr, uint32_t events) {
+    auto sdbx_it = sandbox_map.find(((sandbox_evpair*)hdr)->id);
+    assert(sdbx_it != sandbox_map.end());
+    std::shared_ptr<Sandbox> sdbx = sdbx_it->second;
     unsigned long count;
 
-    if(read(sdbx->memevt_fd, &count, sizeof(count)) != sizeof(count)) {
+    if(read(hdr->fd, &count, sizeof(count)) != sizeof(count)) {
 	return;
     }
-    sdbx->stat.detect_error = SandboxStat::SANDBOX_STAT_OOM;
-    sdbx->terminate();
+    if(sdbx->state == SANDBOX_STATE_RUNNING) {
+	sdbx->stat.detect_error = SandboxStat::SANDBOX_STAT_OOM;
+	sdbx->terminate();
+    }
 }
 
-void Sandbox::force_uvtimer_callback(uv_timer_t *uvtimer) {
-    auto sdbx = (Sandbox*)((uv_handle_t*)uvtimer)->data;
-    sdbx->stat.detect_error = SandboxStat::SANDBOX_STAT_FORCETIMEOUT;
-    sdbx->terminate();
+void Sandbox::forcetime_handler(ev_header *hdr, uint32_t events) {
+    auto sdbx_it = sandbox_map.find(((sandbox_evpair*)hdr)->id);
+    assert(sdbx_it != sandbox_map.end());
+    std::shared_ptr<Sandbox> sdbx = sdbx_it->second;
+    unsigned long count;
+
+    if(read(hdr->fd, &count, sizeof(count)) != sizeof(count)) {
+	return;
+    }
+    if(sdbx->state == SANDBOX_STATE_RUNNING) {
+	sdbx->stat.detect_error = SandboxStat::SANDBOX_STAT_FORCETIMEOUT;
+	sdbx->terminate();
+    }
 }
 
 int Sandbox::sandbox_entry(void *data) {
-    Sandbox *sdbx = (Sandbox*)data;
+    unsigned long id = (unsigned long)data;
+    auto sdbx_it = sandbox_map.find(id);
+    assert(sdbx_it != sandbox_map.end());
+    std::shared_ptr<Sandbox> sdbx = sdbx_it->second;
 
     ptrace(PTRACE_TRACEME, 0, NULL, NULL);
     kill(getpid(), SIGSTOP);

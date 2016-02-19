@@ -1,7 +1,7 @@
 import os
 import shutil
 import mmap
-from tornado import gen, concurrent, process
+from tornado import gen, concurrent
 from tornado.ioloop import IOLoop
 import PyExt
 import Config
@@ -72,9 +72,8 @@ class StdChal:
         self.chal_path = 'container/standard/home/%d'%self.uniqid
         os.mkdir(self.chal_path, mode=0o711)
 
-        yield self.prefetch()
-
-        print('StdChal %d prefetched'%self.chal_id)
+        #yield self.prefetch()
+        #print('StdChal %d prefetched'%self.chal_id)
 
         if self.comp_typ in ['g++', 'clang++']:
             ret = yield self.comp_cxx()
@@ -152,6 +151,9 @@ class StdChal:
             self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
             PyExt.RESTRICT_LEVEL_LOW)
 
+        if task_id is None:
+            _done_cb(-1)
+
         PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
@@ -178,7 +180,7 @@ class StdChal:
                 'TMPDIR=/home/%d/compile'%self.uniqid,
                 'OUT=./a.out',
             ],
-            StdChal.null_fd, 1, 2,
+            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
             '/home/%d/compile'%self.uniqid, 'container/standard',
             self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
             PyExt.RESTRICT_LEVEL_LOW)
@@ -189,7 +191,7 @@ class StdChal:
     def judge_diff(self, in_path, ans_path, timelimit, memlimit, callback):
         infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
         ansfile = open(ans_path, 'rb')
-        outpipe_fd = os.pipe2(os.O_CLOEXEC)
+        outpipe_fd = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
         result_stat = None
         result_pass = None
 
@@ -204,6 +206,7 @@ class StdChal:
             nonlocal result_pass
 
             result_stat = (stat['utime'], stat['peakmem'], stat['detect_error'])
+            print(result_stat)
             if result_pass is not None:
                 callback((result_pass, result_stat))
 
@@ -234,6 +237,12 @@ class StdChal:
                         break
 
             if (events & IOLoop.ERROR) or end_flag:
+                if result_pass is None:
+                    if len(ansfile.read(1)) == 0:
+                        result_pass = True
+                    else:
+                        result_pass = False
+
                 IOLoop.instance().remove_handler(fd)
                 os.close(outpipe_fd[0])
                 ansfile.close()
@@ -255,13 +264,15 @@ class StdChal:
         IOLoop.instance().add_handler(outpipe_fd[0], _diff_out,
             IOLoop.READ | IOLoop.ERROR)
 
-        task_id = PyExt.create_task('/home/%d/run_%d/a.out'%(
-                self.uniqid, judge_uid),
+        task_id = PyExt.create_task('./a.out',
             [],
             [],
             infile_fd, outpipe_fd[1], outpipe_fd[1],
             '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard',
             judge_uid, judge_gid, timelimit, memlimit,
             PyExt.RESTRICT_LEVEL_HIGH)
+
+        if task_id is None:
+            callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
 
         PyExt.start_task(task_id, _done_cb, _started_cb)
