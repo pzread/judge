@@ -106,7 +106,7 @@ class StdChal:
                 + '/compile/__pycache__/test.cpython-34.pyc'
             exe_path = '/usr/bin/python3.4'
             argv = ['./a.out']
-            envp = ['HOME=/']
+            envp = ['HOME=/', 'LANG=en_US.UTF-8']
 
         else:
             exefile_path = self.chal_path + '/compile/a.out'
@@ -236,6 +236,7 @@ class StdChal:
             ],
             [
                 'HOME=/home/%d/compile'%self.uniqid,
+                'LANG=en_US.UTF-8'
             ],
             StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
             '/home/%d/compile'%self.uniqid, 'container/standard',

@@ -21,6 +21,7 @@ cp -a /usr/lib/x86_64-linux-gnu $1/usr/lib/x86_64-linux-gnu
 cp -a /usr/lib/gcc $1/usr/lib/gcc
 cp -a /usr/lib/llvm-3.6 $1/usr/lib/llvm-3.6
 cp -a /usr/lib/python3.4 $1/usr/lib/python3.4
+cp -a /usr/lib/locale $1/usr/lib/locale
 cp -a /usr/include $1/usr/include
 cp -a /lib/x86_64-linux-gnu $1/lib/x86_64-linux-gnu
 cp -a /lib64/ld-linux-x86-64.so.2 $1/lib64/ld-linux-x86-64.so.2
