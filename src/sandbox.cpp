@@ -25,6 +25,7 @@
 #include<sys/timerfd.h>
 #include<sys/signalfd.h>
 #include<sys/resource.h>
+#include<sys/mount.h>
 #include<linux/seccomp.h>
 #include<linux/filter.h>
 #include<linux/audit.h>
@@ -614,6 +615,10 @@ int Sandbox::sandbox_entry(void *data) {
 	_exit(-1);
     }
     if(chdir(sdbx->config.work_path.c_str())) {
+	_exit(-1);
+    }
+
+    if(mount("proc", "/proc", "proc", 0, NULL)) {
 	_exit(-1);
     }
 

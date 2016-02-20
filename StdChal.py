@@ -1,6 +1,6 @@
 import os
 import shutil
-import mmap
+from cffi import FFI
 from tornado import gen, concurrent, process
 from tornado.ioloop import IOLoop
 import PyExt
@@ -16,6 +16,8 @@ STATUS_MLE = 5
 STATUS_CE = 6 
 STATUS_ERR = 7 
 
+MS_BIND = 4096
+
 
 class StdChal:
     last_uniqid = 0
@@ -29,6 +31,15 @@ class StdChal:
         except FileNotFoundError:
             pass
         os.mkdir('container/standard/home', mode=0o711)
+
+        ffi = FFI()
+        ffi.cdef('''int mount(const char source[], const char target[],
+            const char filesystemtype[], unsigned long mountflags,
+            const void *data);''')
+        ffi.cdef('''int umount(const char *target);''')
+        libc = ffi.dlopen('libc.so.6')
+        libc.umount(b'container/standard/dev')
+        libc.mount(b'/dev', b'container/standard/dev', b'', MS_BIND, ffi.NULL)
 
         StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
 
@@ -81,15 +92,34 @@ class StdChal:
         elif self.comp_typ == 'makefile':
             ret = yield self.comp_make()
 
+        elif self.comp_typ == 'python3':
+            ret = yield self.comp_python()
+
         if ret != PyExt.DETECT_NONE:
             shutil.rmtree(self.chal_path)
             return [(0, 0, STATUS_CE)] * len(self.test_list)
 
         print('StdChal %d compiled'%self.chal_id)
 
+        if self.comp_typ == 'python3':
+            exefile_path = self.chal_path \
+                + '/compile/__pycache__/test.cpython-34.pyc'
+            exe_path = '/usr/bin/python3.4'
+            argv = ['./a.out']
+            envp = ['HOME=/']
+
+        else:
+            exefile_path = self.chal_path + '/compile/a.out'
+            exe_path = './a.out'
+            argv = []
+            envp = []
+
         test_future = []
         for test in self.test_list:
-            test_future.append(self.judge_diff(test['in'], test['ans'],
+            test_future.append(self.judge_diff(
+                exefile_path,
+                exe_path, argv, envp,
+                test['in'], test['ans'],
                 test['timelimit'], test['memlimit']))
 
         test_result = yield gen.multi(test_future)
@@ -188,7 +218,47 @@ class StdChal:
         PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
-    def judge_diff(self, in_path, ans_path, timelimit, memlimit, callback):
+    def comp_python(self, callback):
+        def _done_cb(task_id, stat):
+            callback(stat['detect_error'])
+
+        compile_path = self.chal_path + '/compile'
+        os.mkdir(compile_path, mode=0o750)
+        os.chown(compile_path, self.compile_uid, self.compile_gid)
+        shutil.copyfile(self.code_path, compile_path + '/test.py',
+            follow_symlinks=False)
+
+        task_id = PyExt.create_task('/usr/bin/python3.4',
+            [
+                '-m',
+                'py_compile',
+                './test.py'
+            ],
+            [
+                'HOME=/home/%d/compile'%self.uniqid,
+            ],
+            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
+            '/home/%d/compile'%self.uniqid, 'container/standard',
+            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
+            PyExt.RESTRICT_LEVEL_LOW)
+
+        if task_id is None:
+            _done_cb(-1)
+
+        PyExt.start_task(task_id, _done_cb)
+
+    @concurrent.return_future
+    def judge_diff(self,
+        src_path,
+        exe_path,
+        argv,
+        envp,
+        in_path,
+        ans_path,
+        timelimit,
+        memlimit,
+        callback,
+    ):
         infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
         ansfile = open(ans_path, 'rb')
         outpipe_fd = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
@@ -256,17 +326,14 @@ class StdChal:
 
         judge_path = self.chal_path + '/run_%d'%judge_uid
         os.mkdir(judge_path, mode=0o751)
-        shutil.copyfile(self.chal_path + '/compile/a.out',
-            judge_path + '/a.out')
+        shutil.copyfile(src_path, judge_path + '/a.out')
         os.chown(judge_path + '/a.out', judge_uid, judge_gid)
-        os.chmod(judge_path + '/a.out', 0o100)
+        os.chmod(judge_path + '/a.out', 0o500)
 
         IOLoop.instance().add_handler(outpipe_fd[0], _diff_out,
             IOLoop.READ | IOLoop.ERROR)
 
-        task_id = PyExt.create_task('./a.out',
-            [],
-            [],
+        task_id = PyExt.create_task(exe_path, argv, envp,
             infile_fd, outpipe_fd[1], outpipe_fd[1],
             '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard',
             judge_uid, judge_gid, timelimit, memlimit,

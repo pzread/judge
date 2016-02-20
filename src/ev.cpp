@@ -43,7 +43,7 @@ int ev_modify(struct ev_header *evhdr,uint32_t events){
 int ev_init(struct ev_data *evdata){
     int epfd;
 
-    if((epfd = epoll_create(1)) < 0){
+    if((epfd = epoll_create1(EPOLL_CLOEXEC)) < 0){
 	return -1;
     }
     evdata->epfd = epfd;

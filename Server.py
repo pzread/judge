@@ -28,7 +28,7 @@ class JudgeHandler(WebSocketHandler):
 
         test_paramlist = list()
         comp_type = test_list[0]['comp_type']
-        assert(comp_type in ['g++', 'clang++', 'makefile'])
+        assert(comp_type in ['g++', 'clang++', 'makefile', 'python3'])
 
         for test in test_list:
             assert(test['comp_type'] == comp_type)
@@ -94,6 +94,22 @@ class JudgeHandler(WebSocketHandler):
         pass
 
 
+@concurrent.return_future
+def test(callback):
+    def _done_cb(task_id, stat):
+        print(stat)
+        callback()
+
+    task_id = PyExt.create_task('/usr/bin/python3.4',
+        ['-m', 'py_compile', '/test.py'],
+        ['HOME=/'],
+        0, 1, 2,
+        '/', 'container/standard',
+        10000, 10000, 100000000, 256 * 1024 * 1024,
+        PyExt.RESTRICT_LEVEL_HIGH)
+    PyExt.start_task(task_id, _done_cb)
+
+
 def main():
     PyExt.init()
     StdChal.init()
@@ -103,6 +119,8 @@ def main():
         (r'/judge', JudgeHandler),
     ])
     app.listen(2501)
+
+    #IOLoop.instance().add_callback(test)
 
     IOLoop.instance().start()
 
