@@ -24,7 +24,7 @@ def test():
             'timelimit': 2000,
             'memlimit': 256 * 1024 * 1024,
         }    
-    ])
+    ] * 16)
     result_list = yield chal.start()
     print(result_list)
 
