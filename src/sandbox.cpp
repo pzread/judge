@@ -101,6 +101,7 @@ Sandbox::Sandbox(const std::string &_exe_path,
     forcetime_fd = -1;
     memevt_poll = NULL;
     forcetime_poll = NULL;
+    suspend_fd = -1;
 
     try{ 
 	snprintf(cg_name, sizeof(cg_name), "hypex_%lu", id);
@@ -157,7 +158,8 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	forcetime_poll->id = id;
 	ev_register(&memevt_poll->hdr, EPOLLIN);
 	ev_register(&forcetime_poll->hdr, EPOLLIN);
-
+	
+	suspend_fd = eventfd(0, EFD_CLOEXEC);
 	execve_count = 0;
 
     } catch(SandboxException &e) {
@@ -178,6 +180,9 @@ Sandbox::Sandbox(const std::string &_exe_path,
 	    ev_unregister(&forcetime_poll->hdr);
 	    delete forcetime_poll;
 	}
+	if(suspend_fd >= 0) {
+	    close(suspend_fd);
+	}
         if(cg != NULL) {
 	    cgroup_delete_cgroup(cg, 1);
 	    cgroup_free(&cg);
@@ -186,13 +191,14 @@ Sandbox::Sandbox(const std::string &_exe_path,
     }
 }
 
-Sandbox::~Sandbox() {
+Sandbox::~Sandbox() noexcept {
     ev_unregister(&memevt_poll->hdr);
     close(memevt_poll->hdr.fd);
     delete memevt_poll;
     ev_unregister(&forcetime_poll->hdr);
     close(forcetime_poll->hdr.fd);
     delete forcetime_poll;
+    close(suspend_fd);
 
     cgroup_delete_cgroup(cg, 1);
     cgroup_free(&cg);
@@ -216,6 +222,9 @@ void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
 
     run_map[child_pid] = id;
     state = SANDBOX_STATE_PRERUN;
+
+    unsigned long suspend_val = 1;
+    write(suspend_fd, &suspend_val, sizeof(suspend_val));
 }
 
 void Sandbox::stop(bool exit_error) {
@@ -599,8 +608,13 @@ int Sandbox::sandbox_entry(void *data) {
     auto sdbx_it = sandbox_map.find(id);
     assert(sdbx_it != sandbox_map.end());
     std::shared_ptr<Sandbox> sdbx = sdbx_it->second;
+    unsigned long suspend_val;
 
     ptrace(PTRACE_TRACEME, 0, NULL, NULL);
+    if(read(sdbx->suspend_fd, &suspend_val, sizeof(suspend_val))
+	!= sizeof(suspend_val)) {
+	_exit(-1);
+    }
     kill(getpid(), SIGSTOP);
 
     if(setgroups(0, NULL)) {

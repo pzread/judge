@@ -299,7 +299,6 @@ class StdChal:
             nonlocal result_pass
 
             result_stat = (stat['utime'], stat['peakmem'], stat['detect_error'])
-            print(result_stat)
             if result_pass is not None:
                 callback((result_pass, result_stat))
 
