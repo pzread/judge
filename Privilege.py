@@ -23,18 +23,23 @@ def init():
     nobody_gid = nobody_pwd[3]
 
     os.setgroups([])
-    drop()
+    drop(nobody_uid, nobody_gid)
 
 
-def drop():
+def drop(uid, gid):
     os.setegid(0)
     os.seteuid(0)
-    os.setegid(nobody_gid)
-    os.seteuid(nobody_uid)
+    os.setegid(gid)
+    os.seteuid(uid)
 
 
 @contextlib.contextmanager
 def fileaccess():
+    global judge_uid
+    global judge_gid
+
+    old_euid = os.geteuid()
+    old_egid = os.getegid()
     os.setegid(0)
     os.seteuid(0)
     os.setegid(judge_gid)
@@ -42,14 +47,16 @@ def fileaccess():
     try:
         yield
     finally:
-        drop()
+        drop(old_euid, old_egid)
 
 
 @contextlib.contextmanager
 def fullaccess():
+    old_euid = os.geteuid()
+    old_egid = os.getegid()
     os.setegid(0)
     os.seteuid(0)
     try:
         yield
     finally:
-        drop()
+        drop(old_euid, old_egid)

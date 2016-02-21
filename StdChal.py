@@ -202,7 +202,8 @@ class StdChal:
     def comp_make(self, callback):
         def _copy_fn(src, dst, follow_symlinks=True):
             shutil.copy(src, dst, follow_symlinks=False)
-            os.chown(dst, self.compile_uid, self.compile_gid)
+            with StackContext(Privilege.fullaccess):
+                os.chown(dst, self.compile_uid, self.compile_gid)
 
         def _done_cb(task_id, stat):
             callback(stat['detect_error'])
@@ -211,10 +212,11 @@ class StdChal:
             make_path = self.chal_path + '/compile'
             shutil.copytree(self.res_path + '/make', make_path, symlinks=True,
                 copy_function=_copy_fn)
-            os.chmod(make_path, mode=0o770)
-            os.chown(make_path, self.compile_uid, self.compile_gid)
             shutil.copyfile(self.code_path, make_path + '/main.cpp',
                 follow_symlinks=False)
+        with StackContext(Privilege.fullaccess):
+            os.chown(make_path, self.compile_uid, self.compile_gid)
+            os.chmod(make_path, mode=0o770)
 
         task_id = PyExt.create_task('/usr/bin/make',
             [],
@@ -241,9 +243,10 @@ class StdChal:
         with StackContext(Privilege.fileaccess):
             compile_path = self.chal_path + '/compile'
             os.mkdir(compile_path, mode=0o770)
-            os.chown(compile_path, self.compile_uid, self.compile_gid)
             shutil.copyfile(self.code_path, compile_path + '/test.py',
                 follow_symlinks=False)
+        with StackContext(Privilege.fullaccess):
+            os.chown(compile_path, self.compile_uid, self.compile_gid)
 
         task_id = PyExt.create_task('/usr/bin/python3.4',
             [
@@ -347,7 +350,8 @@ class StdChal:
         with StackContext(Privilege.fileaccess):
             judge_path = self.chal_path + '/run_%d'%judge_uid
             os.mkdir(judge_path, mode=0o771)
-            shutil.copyfile(src_path, judge_path + '/a.out')
+            shutil.copyfile(src_path, judge_path + '/a.out',
+                follow_symlinks=False)
         with StackContext(Privilege.fullaccess):
             os.chown(judge_path + '/a.out', judge_uid, judge_gid)
             os.chmod(judge_path + '/a.out', 0o500)
