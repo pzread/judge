@@ -313,7 +313,7 @@ class StdChal:
             if events & IOLoop.READ:
                 while True:
                     try:
-                        data = os.read(outpipe_fd[0], 4096)
+                        data = os.read(outpipe_fd[0], 65536)
                     except BlockingIOError:
                         break
                     ansdata = ansfile.read(len(data))
