@@ -6,8 +6,9 @@ from tornado.ioloop import IOLoop, PollIOLoop
 from tornado.web import Application, RequestHandler
 from tornado.websocket import WebSocketHandler
 import PyExt
-from StdChal import StdChal
+import Privilege
 import Config
+from StdChal import StdChal
 
 
 class UVIOLoop(PollIOLoop):
@@ -111,6 +112,7 @@ def test(callback):
 
 
 def main():
+    Privilege.init()
     PyExt.init()
     StdChal.init()
     IOLoop.configure(UVIOLoop)

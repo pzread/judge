@@ -1,9 +1,12 @@
 import os
 import shutil
+import fcntl
 from cffi import FFI
 from tornado import gen, concurrent, process
+from tornado.stack_context import StackContext
 from tornado.ioloop import IOLoop
 import PyExt
+import Privilege
 import Config
 
 
@@ -26,11 +29,12 @@ class StdChal:
     null_fd = None
 
     def init():
-        try:
-            shutil.rmtree('container/standard/home')
-        except FileNotFoundError:
-            pass
-        os.mkdir('container/standard/home', mode=0o711)
+        with StackContext(Privilege.fileaccess):
+            try:
+                shutil.rmtree('container/standard/home')
+            except FileNotFoundError:
+                pass
+            os.mkdir('container/standard/home', mode=0o771)
 
         ffi = FFI()
         ffi.cdef('''int mount(const char source[], const char target[],
@@ -38,8 +42,10 @@ class StdChal:
             const void *data);''')
         ffi.cdef('''int umount(const char *target);''')
         libc = ffi.dlopen('libc.so.6')
-        libc.umount(b'container/standard/dev')
-        libc.mount(b'/dev', b'container/standard/dev', b'', MS_BIND, ffi.NULL)
+        with StackContext(Privilege.fullaccess):
+            libc.umount(b'container/standard/dev')
+            libc.mount(b'/dev', b'container/standard/dev', b'', MS_BIND,
+                ffi.NULL)
 
         StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
 
@@ -68,10 +74,12 @@ class StdChal:
 
         path_list = list(path_set)
         proc_list = []
-        for idx in range(0, len(path_list), 16):
-            proc_list.append(process.Subprocess(
-                ['./Prefetch.py'] + path_list[idx:idx + 16],
-                stdout=process.Subprocess.STREAM))
+
+        with StackContext(Privilege.fileaccess):
+            for idx in range(0, len(path_list), 16):
+                proc_list.append(process.Subprocess(
+                    ['./Prefetch.py'] + path_list[idx:idx + 16],
+                    stdout=process.Subprocess.STREAM))
 
         for proc in proc_list:
             yield proc.stdout.read_bytes(2)
@@ -81,7 +89,8 @@ class StdChal:
         print('StdChal %d started'%self.chal_id)
 
         self.chal_path = 'container/standard/home/%d'%self.uniqid
-        os.mkdir(self.chal_path, mode=0o711)
+        with StackContext(Privilege.fileaccess):
+            os.mkdir(self.chal_path, mode=0o771)
 
         yield self.prefetch()
         print('StdChal %d prefetched'%self.chal_id)
@@ -96,55 +105,56 @@ class StdChal:
             ret = yield self.comp_python()
 
         if ret != PyExt.DETECT_NONE:
-            shutil.rmtree(self.chal_path)
-            return [(0, 0, STATUS_CE)] * len(self.test_list)
-
-        print('StdChal %d compiled'%self.chal_id)
-
-        if self.comp_typ == 'python3':
-            exefile_path = self.chal_path \
-                + '/compile/__pycache__/test.cpython-34.pyc'
-            exe_path = '/usr/bin/python3.4'
-            argv = ['./a.out']
-            envp = ['HOME=/', 'LANG=en_US.UTF-8']
+            ret_result = [(0, 0, STATUS_CE)] * len(self.test_list)
 
         else:
-            exefile_path = self.chal_path + '/compile/a.out'
-            exe_path = './a.out'
-            argv = []
-            envp = []
+            print('StdChal %d compiled'%self.chal_id)
 
-        test_future = []
-        for test in self.test_list:
-            test_future.append(self.judge_diff(
-                exefile_path,
-                exe_path, argv, envp,
-                test['in'], test['ans'],
-                test['timelimit'], test['memlimit']))
+            if self.comp_typ == 'python3':
+                exefile_path = self.chal_path \
+                    + '/compile/__pycache__/test.cpython-34.pyc'
+                exe_path = '/usr/bin/python3.4'
+                argv = ['./a.out']
+                envp = ['HOME=/', 'LANG=en_US.UTF-8']
 
-        test_result = yield gen.multi(test_future)
-        ret_result = list()
-        for result in test_result:
-            test_pass, data = result
-            runtime, peakmem, error = data
-            status = STATUS_ERR
-            if error == PyExt.DETECT_NONE:
-                if test_pass == True:
-                    status = STATUS_AC                   
-                else:
-                    status = STATUS_WA
-            elif error == PyExt.DETECT_OOM:
-                status = STATUS_MLE
-            elif error == PyExt.DETECT_TIMEOUT \
-                or error == PyExt.DETECT_FORCETIMEOUT:
-                status = STATUS_TLE
-            elif error == PyExt.DETECT_EXITERR:
-                status = STATUS_RE
             else:
-                status = STATUS_ERR
-            ret_result.append((runtime, peakmem, status))
+                exefile_path = self.chal_path + '/compile/a.out'
+                exe_path = './a.out'
+                argv = []
+                envp = []
 
-        shutil.rmtree(self.chal_path)
+            test_future = []
+            for test in self.test_list:
+                test_future.append(self.judge_diff(
+                    exefile_path,
+                    exe_path, argv, envp,
+                    test['in'], test['ans'],
+                    test['timelimit'], test['memlimit']))
+
+            test_result = yield gen.multi(test_future)
+            ret_result = list()
+            for result in test_result:
+                test_pass, data = result
+                runtime, peakmem, error = data
+                status = STATUS_ERR
+                if error == PyExt.DETECT_NONE:
+                    if test_pass == True:
+                        status = STATUS_AC                   
+                    else:
+                        status = STATUS_WA
+                elif error == PyExt.DETECT_OOM:
+                    status = STATUS_MLE
+                elif error == PyExt.DETECT_TIMEOUT \
+                    or error == PyExt.DETECT_FORCETIMEOUT:
+                    status = STATUS_TLE
+                elif error == PyExt.DETECT_EXITERR:
+                    status = STATUS_RE
+                else:
+                    status = STATUS_ERR
+                ret_result.append((runtime, peakmem, status))
+
+        with StackContext(Privilege.fileaccess):
+            shutil.rmtree(self.chal_path)
 
         print('StdChal %d done'%self.chal_id)
         return ret_result
@@ -154,11 +164,13 @@ class StdChal:
         def _done_cb(task_id, stat):
             callback(stat['detect_error'])
 
-        compile_path = self.chal_path + '/compile'
-        os.mkdir(compile_path, mode=0o750)
-        os.chown(compile_path, self.compile_uid, self.compile_gid)
-        shutil.copyfile(self.code_path, compile_path + '/test.cpp',
-            follow_symlinks=False)
+        with StackContext(Privilege.fileaccess):
+            compile_path = self.chal_path + '/compile'
+            os.mkdir(compile_path, mode=0o770)
+            shutil.copyfile(self.code_path, compile_path + '/test.cpp',
+                follow_symlinks=False)
+        with StackContext(Privilege.fullaccess):
+            os.chown(compile_path, self.compile_uid, self.compile_gid)
 
         if self.comp_typ == 'g++':
             compiler = '/usr/bin/g++'
@@ -182,26 +194,29 @@ class StdChal:
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
-            _done_cb(-1)
-
-        PyExt.start_task(task_id, _done_cb)
+            callback(-1)
+        else:
+            PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
     def comp_make(self, callback):
         def _copy_fn(src, dst, follow_symlinks=True):
             shutil.copy(src, dst, follow_symlinks=False)
-            os.chown(dst, self.compile_uid, self.compile_gid)
+            with StackContext(Privilege.fullaccess):
+                os.chown(dst, self.compile_uid, self.compile_gid)
 
         def _done_cb(task_id, stat):
             callback(stat['detect_error'])
 
-        make_path = self.chal_path + '/compile'
-        shutil.copytree(self.res_path + '/make', make_path, symlinks=True,
-            copy_function=_copy_fn)
-        os.chmod(make_path, mode=0o750)
-        os.chown(make_path, self.compile_uid, self.compile_gid)
-        shutil.copyfile(self.code_path, make_path + '/main.cpp',
-            follow_symlinks=False)
+        with StackContext(Privilege.fileaccess):
+            make_path = self.chal_path + '/compile'
+            shutil.copytree(self.res_path + '/make', make_path, symlinks=True,
+                copy_function=_copy_fn)
+            shutil.copyfile(self.code_path, make_path + '/main.cpp',
+                follow_symlinks=False)
+        with StackContext(Privilege.fullaccess):
+            os.chown(make_path, self.compile_uid, self.compile_gid)
+            os.chmod(make_path, mode=0o770)
 
         task_id = PyExt.create_task('/usr/bin/make',
             [],
@@ -215,18 +230,23 @@ class StdChal:
             self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
             PyExt.RESTRICT_LEVEL_LOW)
 
-        PyExt.start_task(task_id, _done_cb)
+        if task_id is None:
+            callback(-1)
+        else:
+            PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
     def comp_python(self, callback):
         def _done_cb(task_id, stat):
             callback(stat['detect_error'])
 
-        compile_path = self.chal_path + '/compile'
-        os.mkdir(compile_path, mode=0o750)
-        os.chown(compile_path, self.compile_uid, self.compile_gid)
-        shutil.copyfile(self.code_path, compile_path + '/test.py',
-            follow_symlinks=False)
+        with StackContext(Privilege.fileaccess):
+            compile_path = self.chal_path + '/compile'
+            os.mkdir(compile_path, mode=0o770)
+            shutil.copyfile(self.code_path, compile_path + '/test.py',
+                follow_symlinks=False)
+        with StackContext(Privilege.fullaccess):
+            os.chown(compile_path, self.compile_uid, self.compile_gid)
 
         task_id = PyExt.create_task('/usr/bin/python3.4',
             [
@@ -244,9 +264,9 @@ class StdChal:
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
-            _done_cb(-1)
-
-        PyExt.start_task(task_id, _done_cb)
+            callback(-1)
+        else:
+            PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
     def judge_diff(self,
@@ -260,9 +280,11 @@ class StdChal:
         memlimit,
         callback,
     ):
-        infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
-        ansfile = open(ans_path, 'rb')
-        outpipe_fd = os.pipe2(os.O_CLOEXEC | os.O_NONBLOCK)
+        with StackContext(Privilege.fileaccess):
+            infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
+            ansfile = open(ans_path, 'rb')
+        outpipe_fd = os.pipe2(os.O_CLOEXEC)
+        fcntl.fcntl(outpipe_fd[0], fcntl.F_SETFL, os.O_NONBLOCK)
         result_stat = None
         result_pass = None
 
@@ -291,7 +313,7 @@ class StdChal:
             if events & IOLoop.READ:
                 while True:
                     try:
-                        data = os.read(outpipe_fd[0], 65536)
+                        data = os.read(outpipe_fd[0], 4096)
                     except BlockingIOError:
                         break
                     ansdata = ansfile.read(len(data))
@@ -325,11 +347,14 @@ class StdChal:
         judge_uid = StdChal.last_judge_uid
         judge_gid = judge_uid
 
-        judge_path = self.chal_path + '/run_%d'%judge_uid
-        os.mkdir(judge_path, mode=0o751)
-        shutil.copyfile(src_path, judge_path + '/a.out')
-        os.chown(judge_path + '/a.out', judge_uid, judge_gid)
-        os.chmod(judge_path + '/a.out', 0o500)
+        with StackContext(Privilege.fileaccess):
+            judge_path = self.chal_path + '/run_%d'%judge_uid
+            os.mkdir(judge_path, mode=0o771)
+            shutil.copyfile(src_path, judge_path + '/a.out',
+                follow_symlinks=False)
+        with StackContext(Privilege.fullaccess):
+            os.chown(judge_path + '/a.out', judge_uid, judge_gid)
+            os.chmod(judge_path + '/a.out', 0o500)
 
         IOLoop.instance().add_handler(outpipe_fd[0], _diff_out,
             IOLoop.READ | IOLoop.ERROR)

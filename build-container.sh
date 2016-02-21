@@ -26,4 +26,6 @@ cp -a /usr/include $1/usr/include
 cp -a /lib/x86_64-linux-gnu $1/lib/x86_64-linux-gnu
 cp -a /lib64/ld-linux-x86-64.so.2 $1/lib64/ld-linux-x86-64.so.2
 
-sudo chown -R root:root $1
+sudo chown -R judge:judge $1
+sudo setfacl -R -m d:g:judge:rwx $1
+sudo setfacl -R -m d:u:judge:rwx $1
