@@ -61,8 +61,8 @@ void sandbox_init() {
 
     sigemptyset(&mask);
     sigaddset(&mask, SIGCHLD);
-    sigchld_sigfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
     sigprocmask(SIG_BLOCK, &mask, NULL);
+    sigchld_sigfd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
 
     sigchld_evhdr = new ev_header();
     sigchld_evhdr->fd = sigchld_sigfd;
@@ -224,6 +224,7 @@ void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
     state = SANDBOX_STATE_PRERUN;
 
     unsigned long suspend_val = 1;
+    ptrace(PTRACE_ATTACH, child_pid, NULL, NULL);
     write(suspend_fd, &suspend_val, sizeof(suspend_val));
 }
 
@@ -255,9 +256,9 @@ void Sandbox::update_state(siginfo_t *siginfo) {
     }
 
     if(state == SANDBOX_STATE_PRERUN) {
-	if(siginfo->si_code != CLD_TRAPPED || siginfo->si_status != SIGSTOP) {
+	/*if(siginfo->si_code != CLD_TRAPPED || siginfo->si_status != SIGTRAP) {
 	    throw SandboxException("Trace task failed.");
-	}
+	}*/
 	if(ptrace(PTRACE_SETOPTIONS, child_pid, NULL,
 	    PTRACE_O_EXITKILL | PTRACE_O_TRACEEXIT | PTRACE_O_TRACESECCOMP |
 	    PTRACE_O_TRACESYSGOOD | PTRACE_O_TRACEEXEC)) {
@@ -319,7 +320,6 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    throw SandboxException("Start force timer failed.");
 	}
 
-	kill(child_pid, SIGCONT);
 	ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 
     } else if(state == SANDBOX_STATE_RUNNING) {
@@ -610,12 +610,10 @@ int Sandbox::sandbox_entry(void *data) {
     std::shared_ptr<Sandbox> sdbx = sdbx_it->second;
     unsigned long suspend_val;
 
-    ptrace(PTRACE_TRACEME, 0, NULL, NULL);
     if(read(sdbx->suspend_fd, &suspend_val, sizeof(suspend_val))
 	!= sizeof(suspend_val)) {
 	_exit(-1);
     }
-    kill(getpid(), SIGSTOP);
 
     if(setgroups(0, NULL)) {
 	_exit(-1);
