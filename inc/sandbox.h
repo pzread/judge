@@ -98,6 +98,7 @@ class Sandbox : public std::enable_shared_from_this<Sandbox> {
 	cgroup_controller *memcg;
 	sandbox_evpair *memevt_poll;
 	sandbox_evpair *forcetime_poll;
+	int suspend_fd;
 	int execve_count;
 
     public:
