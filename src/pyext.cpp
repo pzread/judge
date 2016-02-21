@@ -26,13 +26,36 @@ struct taskstat {
 };
 typedef void (*func_pyext_stop_callback)(unsigned long id, taskstat stat);
 
+static uid_t old_euid = 0;
+static gid_t old_egid = 0;
 static std::unordered_map<int, ev_header*> poll_map;
 
+static void enter_pyext() {
+    assert(old_egid == 0 && old_euid == 0);
+    old_egid = getegid();
+    old_euid = geteuid();
+    if(seteuid(0) || setegid(0)) {
+	ERR("Escalate privilage failed.");
+    }
+}
+static void leave_pyext() {
+    assert(old_egid != 0 && old_euid != 0);
+    if(setegid(old_egid) || seteuid(old_euid)) {
+	ERR("Drop privilage failed.");
+    }
+    old_egid = 0;
+    old_euid = 0;
+}
+
 extern "C" __attribute__((visibility("default"))) int init() {
+    enter_pyext();
+
     if(core_init()) {
 	return -1;
     }
     poll_map.clear();
+
+    leave_pyext();
     return 0;
 }
 
@@ -73,6 +96,8 @@ extern "C" __attribute__((visibility("default")))
 int ext_poll(ev_pollpair pollpairs[], int timeout) {
     int num;
     int i;
+
+    enter_pyext();
     
     if((num = ev_poll(core_evdata, timeout)) < 0) {
 	return 0;
@@ -81,6 +106,8 @@ int ext_poll(ev_pollpair pollpairs[], int timeout) {
 	pollpairs[i].fd = core_evdata->polls[i].fd;
 	pollpairs[i].events = core_evdata->polls[i].events;
     }
+
+    leave_pyext();
     return num;
 }
 
@@ -101,6 +128,7 @@ unsigned long create_task(
     int restrict_level
 ) {
     int i;
+    int ret;
     std::vector<std::string> vec_argv;
     std::vector<std::string> vec_envp;
     SandboxConfig config;
@@ -133,7 +161,10 @@ unsigned long create_task(
     config.uid_map.emplace_back(0, nobody_pwd->pw_uid);
     config.gid_map.emplace_back(0, nobody_pwd->pw_gid);
 
-    return core_create_task(exe_path, vec_argv, vec_envp, config);
+    enter_pyext();
+    ret = core_create_task(exe_path, vec_argv, vec_envp, config);
+    leave_pyext();
+    return ret;
 }
 
 static void stop_task_callback(
@@ -148,10 +179,18 @@ static void stop_task_callback(
     pystat.stime = stat.stime;
     pystat.peakmem = stat.peakmem;
     pystat.detect_error = (int)stat.detect_error;
+
+    leave_pyext();
     callback(id, pystat);
+    enter_pyext();
 }
 
 extern "C" __attribute__((visibility("default")))
 int start_task(unsigned long id, func_pyext_stop_callback callback) {
-    return core_start_task(id, stop_task_callback, (void*)callback);
+    int ret;
+
+    enter_pyext();
+    ret = core_start_task(id, stop_task_callback, (void*)callback);
+    leave_pyext();
+    return ret;
 }

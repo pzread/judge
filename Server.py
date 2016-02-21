@@ -5,8 +5,9 @@ from tornado import gen, concurrent
 from tornado.ioloop import IOLoop, PollIOLoop
 from tornado.web import Application, RequestHandler
 import PyExt
-from StdChal import StdChal
+import Privilege
 import Config
+from StdChal import StdChal
 
 
 class UVIOLoop(PollIOLoop):
@@ -29,6 +30,7 @@ def test():
 
 
 def main():
+    Privilege.init()
     PyExt.init()
     StdChal.init()
     IOLoop.configure(UVIOLoop)

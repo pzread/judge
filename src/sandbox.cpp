@@ -290,7 +290,8 @@ void Sandbox::update_state(siginfo_t *siginfo) {
 	    if(f_gidmap != NULL) {
 		fclose(f_gidmap);
 	    }
-	    throw e;
+
+	    throw;
 	}
 
 	if(cgroup_attach_task_pid(cg, child_pid)) {

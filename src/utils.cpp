@@ -14,6 +14,7 @@ void internal_err(const char *prefix,const char *fmt,...) {
 	va_end(args);
 	while(1);
 }
+
 void internal_info(const char *prefix,const char *fmt,...) {
 	va_list args;
 	std::string cfmt;
@@ -24,6 +25,7 @@ void internal_info(const char *prefix,const char *fmt,...) {
 	va_end(args);
 	fflush(stderr);
 }
+
 void internal_dbg(const char *prefix,const char *fmt,...) {
 	va_list args;
 	std::string cfmt;
