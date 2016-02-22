@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 #
-# Judge documentation build configuration file, created by
-# sphinx-quickstart on Tue Feb 23 00:37:49 2016.
+# Judge - HypeX documentation build configuration file, created by
+# sphinx-quickstart on Tue Feb 23 01:02:44 2016.
 #
 # This file is execfile()d with the current directory set to its
 # containing dir.
@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.abspath('..'))
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
     'sphinx.ext.todo',
     'sphinx.ext.viewcode',
 ]
@@ -50,7 +51,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = 'Judge'
+project = 'Judge - HypeX'
 copyright = '2016, PZ Read'
 author = 'PZ Read'
 
@@ -204,7 +205,7 @@ html_static_path = ['_static']
 #html_search_scorer = 'scorer.js'
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'Judgedoc'
+htmlhelp_basename = 'Judge-HypeXdoc'
 
 # -- Options for LaTeX output ---------------------------------------------
 
@@ -226,7 +227,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'Judge.tex', 'Judge Documentation',
+    (master_doc, 'Judge-HypeX.tex', 'Judge - HypeX Documentation',
      'PZ Read', 'manual'),
 ]
 
@@ -256,7 +257,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'judge', 'Judge Documentation',
+    (master_doc, 'judge-hypex', 'Judge - HypeX Documentation',
      [author], 1)
 ]
 
@@ -270,8 +271,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'Judge', 'Judge Documentation',
-     author, 'Judge', 'One line description of project.',
+    (master_doc, 'Judge-HypeX', 'Judge - HypeX Documentation',
+     author, 'Judge-HypeX', 'One line description of project.',
      'Miscellaneous'),
 ]
 

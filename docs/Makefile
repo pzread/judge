@@ -94,9 +94,9 @@ qthelp:
 	@echo
 	@echo "Build finished; now you can run "qcollectiongenerator" with the" \
 	      ".qhcp project file in $(BUILDDIR)/qthelp, like this:"
-	@echo "# qcollectiongenerator $(BUILDDIR)/qthelp/Judge.qhcp"
+	@echo "# qcollectiongenerator $(BUILDDIR)/qthelp/Judge-HypeX.qhcp"
 	@echo "To view the help file:"
-	@echo "# assistant -collectionFile $(BUILDDIR)/qthelp/Judge.qhc"
+	@echo "# assistant -collectionFile $(BUILDDIR)/qthelp/Judge-HypeX.qhc"
 
 .PHONY: applehelp
 applehelp:
@@ -113,8 +113,8 @@ devhelp:
 	@echo
 	@echo "Build finished."
 	@echo "To view the help file:"
-	@echo "# mkdir -p $$HOME/.local/share/devhelp/Judge"
-	@echo "# ln -s $(BUILDDIR)/devhelp $$HOME/.local/share/devhelp/Judge"
+	@echo "# mkdir -p $$HOME/.local/share/devhelp/Judge-HypeX"
+	@echo "# ln -s $(BUILDDIR)/devhelp $$HOME/.local/share/devhelp/Judge-HypeX"
 	@echo "# devhelp"
 
 .PHONY: epub
