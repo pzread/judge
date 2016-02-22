@@ -1,5 +1,13 @@
-from cffi import FFI
+'''C extension interface.
+
+Attributes:
+    FFI (ffi): cffi interface.
+    FFILIB (object): cffi library.
+
+'''
+
 from collections import deque
+import cffi
 from tornado.ioloop import IOLoop
 import Config
 
@@ -14,39 +22,92 @@ DETECT_FORCETIMEOUT = 3
 DETECT_EXITERR = 4
 DETECT_INTERNALERR = 5
 
-ffi = None
-pyextlib = None
-task_stop_cb = None
-task_map = {}
-task_queue = deque()
-task_running_count = 0
+FFI = None
+FFILIB = None
+TASK_MAP = None
+TASK_QUEUE = None
+TASK_RUNNING_COUNT = 0
+TASK_STOP_CB = None
 
 
-class UvPoll:
+class EvPoll:
+    '''Evpoll interface.
+
+    Attributes:
+        ffi (ffi): cffi interface.
+        ffilib (object): cffi library.
+        pollpairs (object): cffi polling pair buffer.
+
+    '''
+
     def __init__(self):
-        global ffi
-        global pyextlib
+        '''Initialize.'''
 
-        self.ffi = ffi
-        self.pyextlib = pyextlib
+        self.ffi = FFI
+        self.ffilib = FFILIB
         self.pollpairs = self.ffi.new('pollpair[]', 65536)
 
     def close(self):
-        raise NotImplemented()
+        '''Handle close.'''
 
-    def register(self, fd, events):
-        self.pyextlib.ext_register(fd, events)
+        raise NotImplementedError
 
-    def unregister(self, fd):
-        self.pyextlib.ext_unregister(fd)
+    def register(self, evfd, events):
+        '''Register event.
 
-    def modify(self, fd, events):
-        self.pyextlib.ext_modify(fd, events)
+        Args:
+            evfd (int): File descriptor.
+            events (int): Event flag.
 
-    def poll(self, timeout, maxevts = 65536):
-        assert(maxevts <= 65536)
+        Returns:
+            None
 
-        num = self.pyextlib.ext_poll(self.pollpairs, int(timeout * 1000))
+        '''
+
+        self.ffilib.ext_register(evfd, events)
+
+    def unregister(self, evfd):
+        '''Unregister event.
+
+        Args:
+            evfd (int): File descriptor.
+
+        Returns:
+            None
+
+        '''
+
+        self.ffilib.ext_unregister(evfd)
+
+    def modify(self, evfd, events):
+        '''Modify event flag.
+
+        Args:
+            evfd (int): File descriptor.
+            events (int): Event flag.
+
+        Returns:
+            None
+
+        '''
+
+        self.ffilib.ext_modify(evfd, events)
+
+    def poll(self, timeout, maxevts=65536):
+        '''Poll events.
+
+        Args:
+            timeout (int): Timeout.
+            maxevts (int): Maximum number of events which are polled.
+
+        Returns:
+            [(int, int)]: Event pairs (fd, events).
+
+        '''
+
+        assert maxevts <= 65536
+
+        num = self.ffilib.ext_poll(self.pollpairs, int(timeout * 1000))
         pairs = list()
         for idx in range(num):
             pairs.append((
@@ -58,19 +119,25 @@ class UvPoll:
 
 
 def init():
-    global ffi
-    global pyextlib
-    global task_stop_cb
-    global evt_pollpairs
+    '''Initialize the module.'''
 
-    ffi = FFI()
-    ffi.cdef('''
+    global FFI
+    global FFILIB
+    global TASK_MAP
+    global TASK_QUEUE
+    global TASK_STOP_CB
+
+    TASK_MAP = {}
+    TASK_QUEUE = deque()
+
+    FFI = cffi.FFI()
+    FFI.cdef('''
         typedef struct {
             int fd;
             uint32_t events;
         } pollpair;
     ''')
-    ffi.cdef('''
+    FFI.cdef('''
         struct taskstat {
             unsigned long utime;
             unsigned long stime;
@@ -78,31 +145,41 @@ def init():
             int detect_error;
         };
     ''')
-    ffi.cdef('''int init();''')
-    ffi.cdef('''int ext_register(int fd, int events);''')
-    ffi.cdef('''int ext_unregister(int fd);''')
-    ffi.cdef('''int ext_modify(int fd, int events);''')
-    ffi.cdef('''int ext_poll(pollpair[], int timeout);''')
-    ffi.cdef('''unsigned long create_task(
+    FFI.cdef('''int init();''')
+    FFI.cdef('''int ext_register(int fd, int events);''')
+    FFI.cdef('''int ext_unregister(int fd);''')
+    FFI.cdef('''int ext_modify(int fd, int events);''')
+    FFI.cdef('''int ext_poll(pollpair[], int timeout);''')
+    FFI.cdef('''unsigned long create_task(
         char exe_path[], char *argv[], char *envp[], 
         int stdin_fd, int stdout_fd, int stderr_fd, 
         char work_path[], char root_path[], 
         unsigned int uid, unsigned int gid, 
         unsigned long timelimit, unsigned long memlimit, 
         int restrict_level);''')
-    ffi.cdef('''int start_task(unsigned long id,
+    FFI.cdef('''int start_task(unsigned long id,
         void (*callback)(unsigned long id, struct taskstat stat));''')
 
-    pyextlib = ffi.dlopen('lib/libpyext.so')
-    pyextlib.init()
+    FFILIB = FFI.dlopen('lib/libpyext.so')
+    FFILIB.init()
 
-    @ffi.callback('void(unsigned long, struct taskstat)')
+    @FFI.callback('void(unsigned long, struct taskstat)')
     def task_stop_cb(task_id, stat):
-        global task_map
-        global task_running_count
+        '''Task stop callback of cffi.
 
-        callback, _ = task_map[task_id]
-        del task_map[task_id]
+        Args:
+            task_id (int): Task ID.
+            stat (object): Task result.
+
+        Returns:
+            None
+
+        '''
+
+        global TASK_RUNNING_COUNT
+
+        callback, _ = TASK_MAP[task_id]
+        del TASK_MAP[task_id]
 
         IOLoop.instance().add_callback(
             callback,
@@ -115,44 +192,52 @@ def init():
             }
         )
 
-        task_running_count -= 1
+        TASK_RUNNING_COUNT -= 1
         IOLoop.instance().add_callback(emit_task)
 
+    TASK_STOP_CB = task_stop_cb
 
-def create_task(
-    exe_path,
-    argv,
-    envp,
-    stdin_fd,
-    stdout_fd,
-    stderr_fd,
-    work_path,
-    root_path,
-    uid,
-    gid,
-    timelimit,
-    memlimit,
-    restrict_level
-):
-    global ffi
-    global pyextlib
+
+def create_task(exe_path, argv, envp, stdin_fd, stdout_fd, stderr_fd, \
+    work_path, root_path, uid, gid, timelimit, memlimit, restrict_level):
+    '''Create a task.
+
+    Args:
+        exe_path (string): Executable file path.
+        argv ([string]): List of arguments.
+        envp ([string]): List of environment variables.
+        stdin_fd (int): Standard input file descriptor.
+        stdout_fd (int): Standard output file descriptor.
+        stderr_fd (int): Standard error file descriptor.
+        work_path (string): Working directory.
+        root_path (string): Root directory.
+        uid (int): UID of sandbox.
+        gid (int): GID of sandbox.
+        timelimit (int): Timelimit of sandbox.
+        memlimit (int): Memlimit of sandbox.
+        restrict_level (int): Restriction level of sandbox.
+
+    Returns:
+        int: Task ID, or None if failed to create the task.
+
+    '''
 
     ffi_argv = []
     for arg in argv:
-        ffi_argv.append(ffi.new('char[]', arg.encode('utf-8')))
-    ffi_argv.append(ffi.NULL)
+        ffi_argv.append(FFI.new('char[]', arg.encode('utf-8')))
+    ffi_argv.append(FFI.NULL)
 
     ffi_envp = []
     for env in envp:
-        ffi_envp.append(ffi.new('char[]', env.encode('utf-8')))
-    ffi_envp.append(ffi.NULL)
+        ffi_envp.append(FFI.new('char[]', env.encode('utf-8')))
+    ffi_envp.append(FFI.NULL)
 
-    task_id = pyextlib.create_task(
-        ffi.new('char[]', exe_path.encode('utf-8')),
+    task_id = FFILIB.create_task(
+        FFI.new('char[]', exe_path.encode('utf-8')),
         ffi_argv, ffi_envp,
         stdin_fd, stdout_fd, stderr_fd,
-        ffi.new('char[]', work_path.encode('utf-8')),
-        ffi.new('char[]', root_path.encode('utf-8')),
+        FFI.new('char[]', work_path.encode('utf-8')),
+        FFI.new('char[]', root_path.encode('utf-8')),
         uid, gid, timelimit, memlimit, restrict_level)
 
     if task_id == 0:
@@ -162,27 +247,37 @@ def create_task(
 
 
 def start_task(task_id, callback, started_callback=None):
-    global task_stop_cb
-    global task_map
-    global task_queue
+    '''Start a task.
 
-    task_map[task_id] = (callback, started_callback)
-    task_queue.append(task_id)
+    The task may be pended if the running queue is full.
+
+    Args:
+        task_id (int): Task ID.
+        callback (function): Done callback.
+        started_callback (function, optinal): Started callback.
+
+    Returns:
+        None
+
+    '''
+
+    TASK_MAP[task_id] = (callback, started_callback)
+    TASK_QUEUE.append(task_id)
     emit_task()
 
 
 def emit_task():
-    global task_map
-    global task_queue
-    global task_running_count
+    '''Emit tasks.'''
 
-    while len(task_queue) > 0 \
-        and task_running_count < Config.TASK_MAXCONCURRENT:
-        task_id = task_queue.popleft()
-        task_running_count += 1
-        callback, started_callback = task_map[task_id]
+    global TASK_RUNNING_COUNT
 
-        pyextlib.start_task(task_id, task_stop_cb)
+    while len(TASK_QUEUE) > 0 \
+        and TASK_RUNNING_COUNT < Config.TASK_MAXCONCURRENT:
+        task_id = TASK_QUEUE.popleft()
+        TASK_RUNNING_COUNT += 1
+        _, started_callback = TASK_MAP[task_id]
+
+        FFILIB.start_task(task_id, TASK_STOP_CB)
 
         if started_callback is not None:
             started_callback(task_id)

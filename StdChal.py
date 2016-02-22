@@ -1,3 +1,5 @@
+'''Standard challenge module.'''
+
 import os
 import shutil
 import fcntl
@@ -10,25 +12,38 @@ import Privilege
 import Config
 
 
-STATUS_NONE = 0 
-STATUS_AC = 1 
-STATUS_WA = 2 
-STATUS_RE = 3 
-STATUS_TLE = 4 
-STATUS_MLE = 5 
-STATUS_CE = 6 
-STATUS_ERR = 7 
+STATUS_NONE = 0
+STATUS_AC = 1
+STATUS_WA = 2
+STATUS_RE = 3
+STATUS_TLE = 4
+STATUS_MLE = 5
+STATUS_CE = 6
+STATUS_ERR = 7
 
 MS_BIND = 4096
 
 
 class StdChal:
+    '''Standard challenge.
+
+    Static attributes:
+        last_uniqid (int): Last ID.
+        last_compile_uid (int): Last UID for compile.
+        last_judge_uid (int): Last UID for judge.
+        null_fd (int): File descriptor of /dev/null.
+
+    '''
+
     last_uniqid = 0
     last_compile_uid = Config.CONTAINER_STANDARD_UID_BASE
     last_judge_uid = Config.CONTAINER_RESTRICT_UID_BASE
     null_fd = None
 
+    @staticmethod
     def init():
+        '''Initialize the module.'''
+
         with StackContext(Privilege.fileaccess):
             try:
                 shutil.rmtree('container/standard/home')
@@ -44,12 +59,23 @@ class StdChal:
         libc = ffi.dlopen('libc.so.6')
         with StackContext(Privilege.fullaccess):
             libc.umount(b'container/standard/dev')
-            libc.mount(b'/dev', b'container/standard/dev', b'', MS_BIND,
+            libc.mount(b'/dev', b'container/standard/dev', b'', MS_BIND, \
                 ffi.NULL)
 
         StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
 
     def __init__(self, chal_id, code_path, comp_typ, res_path, test_list):
+        '''Initialize.
+
+        Args:
+            chal_id (int): Challenge ID.
+            code_path (string): Code path.
+            comp_typ (string): Type of compile.
+            res_path (string): Resource path.
+            test_list ([dict]): Test parameter lists.
+
+        '''
+
         StdChal.last_uniqid += 1
         self.uniqid = StdChal.last_uniqid
         self.code_path = code_path
@@ -65,10 +91,12 @@ class StdChal:
 
     @gen.coroutine
     def prefetch(self):
+        '''Prefetch files.'''
+
         path_set = set([self.code_path])
         for test in self.test_list:
             path_set.add(os.path.abspath(test['ans']))
-        for root, dirs, files in os.walk(self.res_path):
+        for root, _, files in os.walk(self.res_path):
             for filename in files:
                 path_set.add(os.path.abspath(os.path.join(root, filename)))
 
@@ -86,6 +114,13 @@ class StdChal:
 
     @gen.coroutine
     def start(self):
+        '''Start the challenge.
+
+        Returns:
+            dict: Challenge result.
+
+        '''
+
         print('StdChal %d started'%self.chal_id)
 
         self.chal_path = 'container/standard/home/%d'%self.uniqid
@@ -138,8 +173,8 @@ class StdChal:
                 runtime, peakmem, error = data
                 status = STATUS_ERR
                 if error == PyExt.DETECT_NONE:
-                    if test_pass == True:
-                        status = STATUS_AC                   
+                    if test_pass is True:
+                        status = STATUS_AC
                     else:
                         status = STATUS_WA
                 elif error == PyExt.DETECT_OOM:
@@ -158,16 +193,37 @@ class StdChal:
 
         print('StdChal %d done'%self.chal_id)
         return ret_result
-            
+
     @concurrent.return_future
     def comp_cxx(self, callback):
+        '''GCC, Clang compile.
+
+        Args:
+            callback (function): Callback of return_future.
+
+        Returns:
+            None
+
+        '''
+
         def _done_cb(task_id, stat):
+            '''Done callback.
+
+            Args:
+                task_id (int): Task ID.
+                stat (dict): Task result.
+
+            Returns:
+                None
+
+            '''
+
             callback(stat['detect_error'])
 
         with StackContext(Privilege.fileaccess):
             compile_path = self.chal_path + '/compile'
             os.mkdir(compile_path, mode=0o770)
-            shutil.copyfile(self.code_path, compile_path + '/test.cpp',
+            shutil.copyfile(self.code_path, compile_path + '/test.cpp', \
                 follow_symlinks=False)
         with StackContext(Privilege.fullaccess):
             os.chown(compile_path, self.compile_uid, self.compile_gid)
@@ -177,20 +233,20 @@ class StdChal:
         elif self.comp_typ == 'clang++':
             compiler = '/usr/bin/clang++'
 
-        task_id = PyExt.create_task(compiler,
+        task_id = PyExt.create_task(compiler, \
             [
                 '-O2',
                 '-std=c++14',
                 '-o', './a.out',
                 './test.cpp',
-            ],
+            ], \
             [
                 'PATH=/usr/bin',
                 'TMPDIR=/home/%d/compile'%self.uniqid,
-            ],
-            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
-            '/home/%d/compile'%self.uniqid, 'container/standard',
-            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
+            ], \
+            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
+            '/home/%d/compile'%self.uniqid, 'container/standard', \
+            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
@@ -200,34 +256,67 @@ class StdChal:
 
     @concurrent.return_future
     def comp_make(self, callback):
+        '''Makefile compile.
+
+        Args:
+            callback (function): Callback of return_future.
+
+        Returns:
+            None
+
+        '''
+
         def _copy_fn(src, dst, follow_symlinks=True):
+            '''Copytree helper function.
+
+            Args:
+                src (string): Source path.
+                dst (string): Destination path.
+                follow_symlinks: Follow symbolic link or not.
+
+            Returns:
+                None
+
+            '''
+
             shutil.copy(src, dst, follow_symlinks=False)
             with StackContext(Privilege.fullaccess):
                 os.chown(dst, self.compile_uid, self.compile_gid)
 
         def _done_cb(task_id, stat):
+            '''Done callback.
+
+            Args:
+                task_id (int): Task ID.
+                stat (dict): Task result.
+
+            Returns:
+                None
+
+            '''
+
             callback(stat['detect_error'])
 
         with StackContext(Privilege.fileaccess):
             make_path = self.chal_path + '/compile'
-            shutil.copytree(self.res_path + '/make', make_path, symlinks=True,
+            shutil.copytree(self.res_path + '/make', make_path, symlinks=True, \
                 copy_function=_copy_fn)
-            shutil.copyfile(self.code_path, make_path + '/main.cpp',
+            shutil.copyfile(self.code_path, make_path + '/main.cpp', \
                 follow_symlinks=False)
         with StackContext(Privilege.fullaccess):
             os.chown(make_path, self.compile_uid, self.compile_gid)
             os.chmod(make_path, mode=0o770)
 
-        task_id = PyExt.create_task('/usr/bin/make',
-            [],
+        task_id = PyExt.create_task('/usr/bin/make', \
+            [], \
             [
                 'PATH=/usr/bin',
                 'TMPDIR=/home/%d/compile'%self.uniqid,
                 'OUT=./a.out',
-            ],
-            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
-            '/home/%d/compile'%self.uniqid, 'container/standard',
-            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
+            ], \
+            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
+            '/home/%d/compile'%self.uniqid, 'container/standard', \
+            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
@@ -237,30 +326,51 @@ class StdChal:
 
     @concurrent.return_future
     def comp_python(self, callback):
+        '''Python3.4 compile.
+
+        Args:
+            callback (function): Callback of return_future.
+
+        Returns:
+            None
+
+        '''
+
         def _done_cb(task_id, stat):
+            '''Done callback.
+
+            Args:
+                task_id (int): Task ID.
+                stat (dict): Task result.
+
+            Returns:
+                None
+
+            '''
+
             callback(stat['detect_error'])
 
         with StackContext(Privilege.fileaccess):
             compile_path = self.chal_path + '/compile'
             os.mkdir(compile_path, mode=0o770)
-            shutil.copyfile(self.code_path, compile_path + '/test.py',
+            shutil.copyfile(self.code_path, compile_path + '/test.py', \
                 follow_symlinks=False)
         with StackContext(Privilege.fullaccess):
             os.chown(compile_path, self.compile_uid, self.compile_gid)
 
-        task_id = PyExt.create_task('/usr/bin/python3.4',
+        task_id = PyExt.create_task('/usr/bin/python3.4', \
             [
                 '-m',
                 'py_compile',
                 './test.py'
-            ],
+            ], \
             [
                 'HOME=/home/%d/compile'%self.uniqid,
                 'LANG=en_US.UTF-8'
-            ],
-            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd,
-            '/home/%d/compile'%self.uniqid, 'container/standard',
-            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024,
+            ], \
+            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
+            '/home/%d/compile'%self.uniqid, 'container/standard', \
+            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
@@ -269,17 +379,26 @@ class StdChal:
             PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
-    def judge_diff(self,
-        src_path,
-        exe_path,
-        argv,
-        envp,
-        in_path,
-        ans_path,
-        timelimit,
-        memlimit,
-        callback,
-    ):
+    def judge_diff(self, src_path, exe_path, argv, envp, in_path, ans_path, \
+        timelimit, memlimit, callback):
+        '''Diff judge.
+
+        Args:
+            src_path (string): Executable source path.
+            exe_path (string): Executable or interpreter path in the sandbox.
+            argv ([string]): List of arguments.
+            envp ([string]): List of environment variables.
+            in_path (string): Input file path.
+            ans_path (string): Answer file path.
+            timelimit (int): Timelimit.
+            memlimit (int): Memlimit.
+            callback (function): Callback of return_future.
+
+        Returns:
+            None
+
+        '''
+
         with StackContext(Privilege.fileaccess):
             infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
             ansfile = open(ans_path, 'rb')
@@ -289,12 +408,35 @@ class StdChal:
         result_pass = None
 
         def _started_cb(task_id):
+            '''Started callback.
+
+            Close unused file descriptor after the task is started.
+
+            Args:
+                task_id (int): Task ID.
+
+            Returns:
+                None
+
+            '''
+
             nonlocal infile_fd
             nonlocal outpipe_fd
             os.close(infile_fd)
             os.close(outpipe_fd[1])
 
         def _done_cb(task_id, stat):
+            '''Done callback.
+
+            Args:
+                task_id (int): Task ID.
+                stat (dict): Task result.
+
+            Returns:
+                None
+
+            '''
+
             nonlocal result_stat
             nonlocal result_pass
 
@@ -302,7 +444,18 @@ class StdChal:
             if result_pass is not None:
                 callback((result_pass, result_stat))
 
-        def _diff_out(fd, events):
+        def _diff_out(evfd, events):
+            '''Diff the output of the task.
+
+            Args:
+                evfd (int): Event file descriptor.
+                events (int): Event flags.
+
+            Returns:
+                None
+
+            '''
+
             nonlocal outpipe_fd
             nonlocal ansfile
             nonlocal result_stat
@@ -335,7 +488,7 @@ class StdChal:
                     else:
                         result_pass = False
 
-                IOLoop.instance().remove_handler(fd)
+                IOLoop.instance().remove_handler(evfd)
                 os.close(outpipe_fd[0])
                 ansfile.close()
 
@@ -349,19 +502,19 @@ class StdChal:
         with StackContext(Privilege.fileaccess):
             judge_path = self.chal_path + '/run_%d'%judge_uid
             os.mkdir(judge_path, mode=0o771)
-            shutil.copyfile(src_path, judge_path + '/a.out',
+            shutil.copyfile(src_path, judge_path + '/a.out', \
                 follow_symlinks=False)
         with StackContext(Privilege.fullaccess):
             os.chown(judge_path + '/a.out', judge_uid, judge_gid)
             os.chmod(judge_path + '/a.out', 0o500)
 
-        IOLoop.instance().add_handler(outpipe_fd[0], _diff_out,
+        IOLoop.instance().add_handler(outpipe_fd[0], _diff_out, \
             IOLoop.READ | IOLoop.ERROR)
 
-        task_id = PyExt.create_task(exe_path, argv, envp,
-            infile_fd, outpipe_fd[1], outpipe_fd[1],
-            '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard',
-            judge_uid, judge_gid, timelimit, memlimit,
+        task_id = PyExt.create_task(exe_path, argv, envp, \
+            infile_fd, outpipe_fd[1], outpipe_fd[1], \
+            '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard', \
+            judge_uid, judge_gid, timelimit, memlimit, \
             PyExt.RESTRICT_LEVEL_HIGH)
 
         if task_id is None:

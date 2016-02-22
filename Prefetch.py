@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+'''Prefetch script.'''
 
 import sys
 import os

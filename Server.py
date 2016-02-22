@@ -1,9 +1,14 @@
-import os
+'''Server module.
+
+Handle and response challenge requests from the frontend server.
+
+'''
+
 import json
 from collections import deque
-from tornado import gen, concurrent
+from tornado import gen
 from tornado.ioloop import IOLoop, PollIOLoop
-from tornado.web import Application, RequestHandler
+from tornado.web import Application
 from tornado.websocket import WebSocketHandler
 import PyExt
 import Privilege
@@ -11,17 +16,43 @@ import Config
 from StdChal import StdChal
 
 
-class UVIOLoop(PollIOLoop):
+class EvIOLoop(PollIOLoop):
+    '''Tornado compatible ioloop interface.'''
+
     def initialize(self, **kwargs):
-        super().initialize(impl = PyExt.UvPoll(), **kwargs)
+        '''Initialize.'''
+
+        super().initialize(impl=PyExt.EvPoll(), **kwargs)
 
 
-class JudgeHandler(WebSocketHandler): 
+class JudgeHandler(WebSocketHandler):
+    '''Judge request handler.
+
+    Static attributes:
+        chal_running_count (int): Number of current running challenges.
+        chal_queue (deque): Pending challenges.
+
+    '''
+
     chal_running_count = 0
     chal_queue = deque()
 
+    @staticmethod
     @gen.coroutine
-    def start_chal(obj, ws):
+    def start_chal(obj, websk):
+        '''Start a challenge.
+
+        Check the challenge config, issue judge tasks, then report the result.
+
+        Args:
+            obj (dict): Challenge config.
+            websk (WebSocketHandler): Websocket object.
+
+        Returns:
+            None
+
+        '''
+
         chal_id = obj['chal_id']
         code_path = '/srv/nfs' + obj['code_path'][4:]
         test_list = obj['testl']
@@ -29,11 +60,11 @@ class JudgeHandler(WebSocketHandler):
 
         test_paramlist = list()
         comp_type = test_list[0]['comp_type']
-        assert(comp_type in ['g++', 'clang++', 'makefile', 'python3'])
+        assert comp_type in ['g++', 'clang++', 'makefile', 'python3']
 
         for test in test_list:
-            assert(test['comp_type'] == comp_type)
-            assert(test['check_type'] == 'diff')
+            assert test['comp_type'] == comp_type
+            assert test['check_type'] == 'diff'
             test_idx = test['test_idx']
             memlimit = test['memlimit']
             timelimit = test['timelimit']
@@ -63,7 +94,7 @@ class JudgeHandler(WebSocketHandler):
                 total_status = max(total_status, status)
                 idx += 1
 
-            ws.write_message(json.dumps({
+            websk.write_message(json.dumps({
                 'chal_id': chal_id,
                 'test_idx': test_idx,
                 'state': total_status,
@@ -74,9 +105,21 @@ class JudgeHandler(WebSocketHandler):
         JudgeHandler.chal_running_count -= 1
         JudgeHandler.emit_chal()
 
-    def emit_chal(obj=None, ws=None):
+    @staticmethod
+    def emit_chal(obj=None, websk=None):
+        '''Emit a challenge to the queue and trigger the start_chal.
+
+        Args:
+            obj (dict, optional): Challenge config.
+            websk (WebSocketHandler): Websocket object.
+
+        Returns:
+            None
+
+        '''
+
         if obj is not None:
-            JudgeHandler.chal_queue.append((obj, ws))
+            JudgeHandler.chal_queue.append((obj, websk))
 
         while len(JudgeHandler.chal_queue) > 0 \
             and JudgeHandler.chal_running_count < Config.TASK_MAXCONCURRENT:
@@ -84,45 +127,35 @@ class JudgeHandler(WebSocketHandler):
             JudgeHandler.chal_running_count += 1
             IOLoop.instance().add_callback(JudgeHandler.start_chal, *chal)
 
-    def open(self): 
-        pass 
+    def open(self):
+        '''Handle open event'''
 
-    def on_message(self, msg): 
+        pass
+
+    def on_message(self, msg):
+        '''Handle message event'''
+
         obj = json.loads(msg, 'utf-8')
         JudgeHandler.emit_chal(obj, self)
 
-    def on_close(self): 
+    def on_close(self):
+        '''Handle close event'''
+
         pass
 
 
-@concurrent.return_future
-def test(callback):
-    def _done_cb(task_id, stat):
-        print(stat)
-        callback()
-
-    task_id = PyExt.create_task('/usr/bin/python3.4',
-        ['-m', 'py_compile', '/test.py'],
-        ['HOME=/'],
-        0, 1, 2,
-        '/', 'container/standard',
-        10000, 10000, 100000000, 256 * 1024 * 1024,
-        PyExt.RESTRICT_LEVEL_HIGH)
-    PyExt.start_task(task_id, _done_cb)
-
-
 def main():
+    '''Main function.'''
+
     Privilege.init()
     PyExt.init()
     StdChal.init()
-    IOLoop.configure(UVIOLoop)
+    IOLoop.configure(EvIOLoop)
 
     app = Application([
         (r'/judge', JudgeHandler),
     ])
     app.listen(2501)
-
-    #IOLoop.instance().add_callback(test)
 
     IOLoop.instance().start()
 
