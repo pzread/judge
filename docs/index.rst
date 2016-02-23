@@ -59,19 +59,14 @@ Run Tests
    python3 -m tornado.test.runtests tests.TestAll
 
 
-Source Docstring:
------------------
+Tables of contents
+==================
 
 .. toctree::
    :maxdepth: 4
 
-   Config
-   Prefetch
-   Privilege
-   PyExt
-   Server
-   StdChal
-   Core
+   Guidelines
+   Docstrings
 
 
 Indices and tables
