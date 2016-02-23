@@ -2,7 +2,7 @@ Judge - HypeX
 ============
 
 ![docs badge](https://readthedocs.org/projects/pip/badge/?version=stable)
-![build badge](https://travis-ci.org/pzread/judge.svg?branch=master)
+![build badge](https://travis-ci.org/pzread/judge.svg?branch=release)
 
 See the document: http://judge-hypex.readthedocs.org/en/stable/
 
