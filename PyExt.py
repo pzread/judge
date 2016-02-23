@@ -50,7 +50,7 @@ class EvPoll:
     def close(self):
         '''Handle close.'''
 
-        raise NotImplementedError
+        pass
 
     def register(self, evfd, events):
         '''Register event.
