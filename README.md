@@ -5,6 +5,7 @@ Judge - HypeX
 ![build badge](https://travis-ci.org/pzread/judge.svg?branch=master)
 
 See the document: http://judge-hypex.readthedocs.org/en/latest/
+
 Travis CI: https://travis-ci.org/pzread/judge
 
 Roadmap
