@@ -1,0 +1,12 @@
+language: cpp    
+
+before_install:
+    - sudo apt-get install -y build-essential cmake libcgroup-dev
+
+install:
+    - mkdir lib
+
+script:
+    - cd lib
+    - cmake ..
+    - make
