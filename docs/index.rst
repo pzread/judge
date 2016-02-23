@@ -8,7 +8,7 @@ Judge - HypeX documentation
 
 Judge - HypeX is a judge system which focuses on performance and security.
 
-It requires root permission to run. And the host must have the full Linux namespaces support and the memory cgroup.
+It requires root permission to run. The host must have the full Linux namespaces support and the memory cgroup, also the Access Control Lists needs to be enabled on the file system.
 
 
 Requirements
