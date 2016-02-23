@@ -102,6 +102,19 @@ DLL_EXPORT int init() {
 
 /*!
 
+Destroy the extension.
+
+*/
+DLL_EXPORT void destroy() {
+    enter_pyext();
+
+    core_destroy();
+
+    leave_pyext();
+}
+
+/*!
+
 Register a event.
 
 @param fd File descriptor.

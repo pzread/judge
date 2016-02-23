@@ -55,6 +55,7 @@ class Task {
 };
 
 int core_init();
+void core_destroy();
 uint64_t core_create_task(const std::string &exe_path,
     const std::vector<std::string> &argv,
     const std::vector<std::string> &envp,

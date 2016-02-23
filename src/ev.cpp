@@ -87,6 +87,5 @@ int ev_poll(struct ev_data *evdata,int timeout){
 }
 int ev_close(struct ev_data *evdata){
     close(evdata->epfd);
-
     return 0;
 }

@@ -52,6 +52,17 @@ int core_init() {
 
 /*!
 
+Destroy event loop.
+
+*/
+void core_destroy() {
+    ev_close(core_evdata);
+
+    INFO("Destroyed.\n");
+}
+
+/*!
+
 Handle sandbox stop event. It will call the corresponding task stop callback,
 and remove the task from task_map.
 

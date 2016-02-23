@@ -50,7 +50,7 @@ class EvPoll:
     def close(self):
         '''Handle close.'''
 
-        pass
+        self.ffilib.destroy()
 
     def register(self, evfd, events):
         '''Register event.
@@ -146,6 +146,7 @@ def init():
         };
     ''')
     FFI.cdef('''int init();''')
+    FFI.cdef('''void destroy();''')
     FFI.cdef('''int ext_register(int fd, int events);''')
     FFI.cdef('''int ext_unregister(int fd);''')
     FFI.cdef('''int ext_modify(int fd, int events);''')
