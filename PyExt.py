@@ -139,9 +139,9 @@ def init():
     ''')
     FFI.cdef('''
         struct taskstat {
-            unsigned long utime;
-            unsigned long stime;
-            unsigned long peakmem;
+            uint64_t utime;
+            uint64_t stime;
+            uint64_t peakmem;
             int detect_error;
         };
     ''')
@@ -150,20 +150,20 @@ def init():
     FFI.cdef('''int ext_unregister(int fd);''')
     FFI.cdef('''int ext_modify(int fd, int events);''')
     FFI.cdef('''int ext_poll(pollpair[], int timeout);''')
-    FFI.cdef('''unsigned long create_task(
+    FFI.cdef('''uint64_t create_task(
         char exe_path[], char *argv[], char *envp[], 
         int stdin_fd, int stdout_fd, int stderr_fd, 
         char work_path[], char root_path[], 
         unsigned int uid, unsigned int gid, 
-        unsigned long timelimit, unsigned long memlimit, 
+        uint64_t timelimit, uint64_t memlimit, 
         int restrict_level);''')
-    FFI.cdef('''int start_task(unsigned long id,
-        void (*callback)(unsigned long id, struct taskstat stat));''')
+    FFI.cdef('''int start_task(uint64_t id,
+        void (*callback)(uint64_t id, struct taskstat stat));''')
 
     FFILIB = FFI.dlopen('lib/libpyext.so')
     FFILIB.init()
 
-    @FFI.callback('void(unsigned long, struct taskstat)')
+    @FFI.callback('void(uint64_t, struct taskstat)')
     def task_stop_cb(task_id, stat):
         '''Task stop callback of cffi.
 
