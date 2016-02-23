@@ -8,7 +8,7 @@ Judge - HypeX documentation
 
 Judge - HypeX is a judge system which focuses on performance and security.
 
-It requires root permission to run. The host must have the full Linux namespaces support and the memory cgroup, also the Access Control Lists needs to be enabled on the file system.
+It requires root permission to run. The host must have the full ``Linux namespaces`` support and the ``memory cgroup``, also the ``access control lists(acl)`` needs to be enabled on the file system.
 
 
 Requirements
@@ -27,7 +27,7 @@ Requirements
 Installation
 ------------
 
-build-container.sh is used to copy files from the host to create the container. Currently, it is designed for Ubuntu 15.10 x86_64. You may need to modify it to fit your host's file system.
+build-container.sh is used to copy files from the host to create the container. Currently, it is designed for ``Ubuntu 15.10 x86_64``. You may need to modify it to fit your host's file system.
 
 .. code::
    
@@ -53,7 +53,7 @@ Usage
 
 .. WARNING::
    
-   Before delete the container directory, always remember to umount the udev file systems under it.
+   Before delete the ``container`` directory, always remember to umount the ``udev file systems`` under it.
 
 
 Run Tests
