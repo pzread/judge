@@ -1,7 +1,7 @@
 sudo: required
 dist: trusty
-
 language: cpp
+
 matrix:
     include:
 	- compiler: gcc
@@ -31,14 +31,14 @@ matrix:
 	    env: COMPILER=clang++-3.6
 
 before_install:
-- sudo apt-get install -y build-essential cmake libcgroup-dev
+    - sudo apt-get install -y build-essential cmake libcgroup-dev
 
 install:
-- mkdir lib
+    - mkdir lib
 
 before_script:
-- cd lib
+    - cd lib
 
 script:
-- cmake ..
-- make
+    - cmake ..
+    - make
