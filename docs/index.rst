@@ -3,10 +3,64 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to Judge - HypeX's documentation!
+Judge - HypeX documentation
 =========================================
 
-Contents:
+Judge - HypeX is a judge system which focuses on performance and security.
+
+It requires root permission to run. And the host must have the full Linux namespaces support and the memory cgroup.
+
+
+Requirements
+------------
+
+- python3 >= 3.4
+- python3-pip
+- gcc >= 4.9
+- g++ >= 4.9
+- clang >= 3.6
+- clang++ >= 3.6
+- cmake >= 2.8
+- libcgroup-dev >= 0.41
+
+
+Installation
+------------
+
+build-container.sh is used to copy files from the host to create the container. Currently, it is designed for Ubuntu 15.10 x86_64. You may need to modify it to fit your host's file system.
+
+.. code::
+   
+   git clone https://github.com/pzread/judge.git
+   cd judge
+   pip3 install -r requirements.txt
+   mkdir lib
+   cd lib
+   cmake ..
+   make
+   cd ..
+   ./setup.sh
+
+
+Usage
+-----
+
+.. code::
+   
+   cd judge
+   sudo python3 Server.py
+   
+
+Run Tests
+--------
+
+.. code::
+
+   python3 -m tornado.test.runtests tests.TestAll
+
+
+Source Docstring:
+-----------------
 
 .. toctree::
    :maxdepth: 4
