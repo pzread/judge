@@ -1,4 +1,4 @@
-Core Module
+Core module
 ============
 
 .. doxygenindex::
