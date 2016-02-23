@@ -57,7 +57,7 @@ static std::unordered_map<int, ev_header*> poll_map; //!< Poll event map.
 
 /*!
 
-Escalate privilage while entering the extension.
+Escalate privilege while entering the extension.
 
 */
 static void enter_pyext() {
@@ -65,19 +65,19 @@ static void enter_pyext() {
     old_egid = getegid();
     old_euid = geteuid();
     if (seteuid(0) || setegid(0)) {
-        ERR("Escalate privilage failed.");
+        ERR("Escalate privilege failed.");
     }
 }
 
 /*!
 
-Recover privilage while leaving the extension.
+Recover privilege while leaving the extension.
 
 */
 static void leave_pyext() {
     assert(old_egid != 0 && old_euid != 0);
     if (setegid(old_egid) || seteuid(old_euid)) {
-        ERR("Drop privilage failed.");
+        ERR("Drop privilege failed.");
     }
     old_egid = 0;
     old_euid = 0;
