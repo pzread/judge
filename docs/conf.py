@@ -14,7 +14,7 @@
 # serve to show the default.
 
 import sys
-import os
+import subprocess, os
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -34,7 +34,15 @@ extensions = [
     'sphinx.ext.napoleon',
     'sphinx.ext.todo',
     'sphinx.ext.viewcode',
+    'breathe',
 ]
+
+breathe_projects = {"Core": "../xml"}
+breathe_default_project = "Core"
+
+read_the_docs_build = os.environ.get('READTHEDOCS', None) == 'True'
+if read_the_docs_build:
+    subprocess.call('cd ../doxygen; doxygen', shell=True)
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

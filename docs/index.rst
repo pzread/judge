@@ -17,6 +17,7 @@ Contents:
    PyExt
    Server
    StdChal
+   Core
 
 
 Indices and tables
