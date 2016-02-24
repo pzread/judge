@@ -27,7 +27,7 @@ Requirements
 Installation
 ------------
 
-build-container.sh is used to copy files from the host to create the container. Currently, it is designed for ``Ubuntu 15.10 x86_64``. You may need to modify it to fit your host's file system.
+build-container.sh is used to copy files from the host to create the container. Currently, it is designed for ``Ubuntu 15.10 x86_64``. You may need to modify it to fit your host's file system. Or you can install it in the docker (see Use Docker).
 
 .. code::
    
@@ -57,11 +57,30 @@ Usage
 
 
 Run Tests
---------
+---------
 
 .. code::
 
-   python3 -m tornado.test.runtests tests.TestAll
+   cd judge
+   sudo python3 -m tornado.test.runtests tests.TestAll
+
+
+Use Docker
+------------
+
+.. WARNING::
+   
+   Make sure your docker supports ``access control lists(acl)``. For more information, see `How to use setfacl within a Docker container? <http://stackoverflow.com/questions/22714885/how-to-use-setfacl-within-a-docker-container>`_.
+   
+   There is a problem that acl isn't persistent on the docker's file system, so ./setup.sh have to be run after starting a container.
+   
+   For `docker run`, you may need to expose ports to the host.
+
+.. code::
+
+   cd judge
+   docker build -t judge .
+   docker run --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 Server.py'
 
 
 Tables of contents
