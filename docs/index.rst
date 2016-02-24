@@ -16,12 +16,12 @@ Requirements
 
 - python3 >= 3.4
 - python3-pip
-- gcc >= 4.9
-- g++ >= 4.9
+- gcc >= 5
+- g++ >= 5
 - clang >= 3.6
-- clang++ >= 3.6
 - cmake >= 2.8
 - libcgroup-dev >= 0.41
+- acl
 
 
 Installation
