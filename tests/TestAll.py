@@ -4,6 +4,7 @@ from tornado import testing
 from tornado.ioloop import IOLoop, PollIOLoop
 import PyExt
 import Privilege
+import StdChal
 from StdChal import StdChal
 
 
@@ -45,4 +46,4 @@ class StdChalCase(testing.AsyncTestCase):
         result_list = yield chal.start()
         for result in result_list:
             _, _, status = result
-            self.assertEqual(status, 1)
+            self.assertEqual(status, StdChal.STATUS_AC)

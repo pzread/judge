@@ -4,27 +4,13 @@ language: cpp
 service: 
     - docker
 
-addons:
-    apt:
-        sources:
-        - ubuntu-toolchain-r-test
-        - llvm-toolchain-precise-3.6
-        packages:
-        - clang-3.6
-
 before_install:
-    - sudo apt-get update
-    - sudo apt-get install -y build-essential cmake libcgroup-dev acl
     - echo 'DOCKER_OPTS="-H tcp://127.0.0.1:2375 -H unix:///var/run/docker.sock -s devicemapper"' | sudo tee /etc/default/docker > /dev/null
     - sudo service docker restart
     - sleep 5
 
 install:
-    - mkdir lib
     - docker build -t judge .
 
 script:
-    - cd lib
-    - CC=clang-3.6 CXX=clang++-3.6 cmake ..
-    - make
     - docker run --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 -m tornado.test.runtests tests.TestAll'
