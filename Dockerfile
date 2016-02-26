@@ -19,6 +19,7 @@ RUN if [ "${TRAVIS_COMMIT}" ]; then \
     cd judge && \
     git init && \
     git remote add origin https://github.com/pzread/judge.git && \
+    git fetch origin && \
     git fetch origin ${TRAVIS_COMMIT} && \
     git reset --hard FETCH_HEAD; \
     else \
