@@ -1,4 +1,6 @@
 FROM ubuntu:15.10
+ARG TRAVIS_COMMIT
+ENV TRAVIS_COMMIT $TRAVIS_COMMIT
 
 RUN apt-get update && apt-get install -y \
     python3.4 \
