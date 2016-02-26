@@ -12,7 +12,16 @@ RUN apt-get update && apt-get install -y \
     sudo \
     acl
 
-RUN git clone https://github.com/pzread/judge.git
+RUN if [ "${TRAVIS_COMMIT}" ]; then \
+    mkdir judge && \
+    cd judge && \
+    git init && \
+    git remote add origin https://github.com/pzread/judge.git && \
+    git fetch origin ${TRAVIS_COMMIT} && \
+    git reset --hard FETCH_HEAD; \
+    else \
+    git clone https://github.com/pzread/judge.git; fi
+
 RUN cd judge && \
     pip3 install -r requirements.txt && \
     mkdir lib && \
