@@ -246,7 +246,7 @@ class StdChal:
             ], \
             StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
             '/home/%d/compile'%self.uniqid, 'container/standard', \
-            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024, \
+            self.compile_uid, self.compile_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
@@ -316,7 +316,7 @@ class StdChal:
             ], \
             StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
             '/home/%d/compile'%self.uniqid, 'container/standard', \
-            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024, \
+            self.compile_uid, self.compile_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
@@ -370,7 +370,7 @@ class StdChal:
             ], \
             StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
             '/home/%d/compile'%self.uniqid, 'container/standard', \
-            self.compile_uid, self.compile_gid, 60000, 256 * 1024 * 1024, \
+            self.compile_uid, self.compile_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
