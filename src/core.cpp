@@ -12,6 +12,7 @@ Task controller, which is responsible to create, maintain, and destroy tasks.
 
 #define LOG_PREFIX "core"
 
+#include <sys/resource.h>
 #include <ev.h>
 #include <utils.h>
 #include <core.h>
@@ -37,6 +38,14 @@ Initialize event loop, sandbox environment, and global variables.
 
 */
 int core_init() {
+    rlimit lim;
+
+    lim.rlim_cur = 65536;
+    lim.rlim_max = 65536;
+    if(setrlimit(RLIMIT_NOFILE, &lim)) {
+        return -1;
+    }
+
     core_evdata = new ev_data();
     ev_init(core_evdata);
     task_map.clear();

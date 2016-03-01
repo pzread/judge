@@ -3,6 +3,7 @@ Guidelines
 
 Directories
 -----------
+
 After installed, there are several files under the judge directory.
 
 .. code::

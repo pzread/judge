@@ -94,6 +94,7 @@ Tables of contents
 .. toctree::
    :maxdepth: 4
 
+   APIs
    Guidelines
    Docstrings
 
