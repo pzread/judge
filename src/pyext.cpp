@@ -46,6 +46,40 @@ struct taskstat {
 
 /*!
 
+UID/GID mapping.
+
+*/
+struct uidpair {
+    uid_t host;
+    uid_t guest;
+};
+struct gidpair {
+    gid_t host;
+    gid_t guest;
+};
+struct idmap {
+    unsigned int uid_num;
+    unsigned int gid_num;
+    uidpair *uid_map;
+    gidpair *gid_map;
+};
+
+/*!
+
+File descriptor mapping.
+
+*/
+struct fdpair {
+    int host;
+    int guest;
+};
+struct fdmap {
+    unsigned int num;
+    fdpair *map;
+};
+
+/*!
+
 Prototype of stop callback for CFFI interface.
 
 */
@@ -220,18 +254,17 @@ DLL_EXPORT uint64_t create_task(
     const char *exe_path,
     const char *argv[],
     const char *envp[],
-    int stdin_fd,
-    int stdout_fd,
-    int stderr_fd,
     const char *work_path,
     const char *root_path,
-    unsigned int uid,
-    unsigned int gid,
+    uid_t uid,
+    gid_t gid,
+    idmap *id_map,
+    fdmap *fd_map,
     uint64_t timelimit,
     uint64_t memlimit,
     int restrict_level
 ) {
-    int i;
+    unsigned int i;
     int ret;
     std::vector<std::string> vec_argv;
     std::vector<std::string> vec_envp;
@@ -244,17 +277,20 @@ DLL_EXPORT uint64_t create_task(
         vec_envp.emplace_back(envp[i]);
     }
 
-    config.stdin_fd = stdin_fd;
-    config.stdout_fd = stdout_fd;
-    config.stderr_fd = stdout_fd;
-    config.work_path = work_path;
-    config.root_path = root_path;
-    config.uid = uid;
-    config.gid = gid;
-    config.timelimit = timelimit;
-    config.memlimit = memlimit;
-    config.restrict_level = (sandbox_restrict_level)restrict_level;
-
+    // Direct map UID/GID of the sandbox.
+    for (i = 0; i < id_map->uid_num; i++) {
+        if(id_map->uid_map[i].host != 0) {
+            config.uid_map.emplace_back(id_map->uid_map[i].guest,
+                id_map->uid_map[i].host);
+        }
+    }
+    for (i = 0; i < id_map->gid_num; i++) {
+        if(id_map->gid_map[i].host != 0) {
+            config.gid_map.emplace_back(id_map->gid_map[i].guest,
+                id_map->gid_map[i].host);
+        }
+    }
+    // Map UID/GID 0 in the sandbox to nobody at the outside.
     passwd nobody_pwdbuf, *nobody_pwd;
     char pwd_namebuf[4096];
     if (getpwnam_r("nobody", &nobody_pwdbuf, pwd_namebuf,
@@ -262,12 +298,20 @@ DLL_EXPORT uint64_t create_task(
         ERR("Can't get passwd of nobody\n");
         return 0;
     }
-    // Direct map UID/GID of the sandbox.
-    config.uid_map.emplace_back(uid, uid);
-    config.gid_map.emplace_back(gid, gid);
-    // Map UID/GID 0 in the sandbox to nobody at the outside.
     config.uid_map.emplace_back(0, nobody_pwd->pw_uid);
     config.gid_map.emplace_back(0, nobody_pwd->pw_gid);
+    // Map file descriptors.
+    for (i = 0; i < fd_map->num; i++) {
+        config.fd_map.emplace_back(fd_map->map[i].guest, fd_map->map[i].host);
+    }
+    // Other attributes.
+    config.work_path = work_path;
+    config.root_path = root_path;
+    config.uid = uid;
+    config.gid = gid;
+    config.timelimit = timelimit;
+    config.memlimit = memlimit;
+    config.restrict_level = (sandbox_restrict_level)restrict_level;
 
     enter_pyext();
     ret = core_create_task(exe_path, vec_argv, vec_envp, config);

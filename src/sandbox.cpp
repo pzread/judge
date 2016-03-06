@@ -291,7 +291,10 @@ void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
     uint64_t suspend_val = 1;
     ptrace(PTRACE_ATTACH, child_pid, NULL, NULL);
     // Resume the process.
-    write(suspend_fd, &suspend_val, sizeof(suspend_val));
+    if(write(suspend_fd, &suspend_val, sizeof(suspend_val))
+        != sizeof(suspend_val)) {
+        ERR("Resume process failed.\n");
+    }
 }
 
 /*!
@@ -749,6 +752,7 @@ The sandboxed process entry.
 
 */
 int Sandbox::sandbox_entry(void *data) {
+    unsigned int i;
     uint64_t id = (uint64_t)data;
     auto sdbx_it = sandbox_map.find(id);
     assert(sdbx_it != sandbox_map.end());
@@ -790,11 +794,11 @@ int Sandbox::sandbox_entry(void *data) {
         }
     }
 
-    dup2(sdbx->config.stdin_fd, 0);
-    dup2(sdbx->config.stdout_fd, 1);
-    dup2(sdbx->config.stderr_fd, 2);
+    // Map file descriptors.
+    for (i = 0; i < sdbx->config.fd_map.size(); i++) {
+        dup2(sdbx->config.fd_map[i].second, sdbx->config.fd_map[i].first);
+    }
 
-    unsigned int i;
     char **c_argv = new char*[sdbx->argv.size() + 2];
     char **c_envp = new char*[sdbx->envp.size() + 1];
     auto c_exe_path = strdup(sdbx->exe_path.c_str());

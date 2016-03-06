@@ -90,15 +90,13 @@ Sandbox configuration.
 */
 class SandboxConfig {
  public:
-    int stdin_fd; //!< Standard input file descriptor.
-    int stdout_fd; //!< Standard output file descriptor.
-    int stderr_fd; //!< Standard error file descriptor.
     std::string work_path; //!< Working directory in the sanbox.
     std::string root_path; //!< Root directory for chroot.
     uid_t uid; //!< UID.
     gid_t gid; //!< GID.
     std::vector<std::pair<uid_t, uid_t>> uid_map; //!< UID mapping.
     std::vector<std::pair<gid_t, gid_t>> gid_map; //!< GID mapping.
+    std::vector<std::pair<int, int>> fd_map; //!< File descriptor mapping.
     uint64_t timelimit; //!< Timelimit.
     uint64_t memlimit; //!< Memlimit.
     sandbox_restrict_level restrict_level; //!< Restriction level.

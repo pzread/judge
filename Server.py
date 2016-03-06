@@ -132,7 +132,7 @@ class JudgeHandler(WebSocketHandler):
     def open(self):
         '''Handle open event'''
 
-        pass
+        print('Frontend connected')
 
     def on_message(self, msg):
         '''Handle message event'''
@@ -143,7 +143,7 @@ class JudgeHandler(WebSocketHandler):
     def on_close(self):
         '''Handle close event'''
 
-        pass
+        print('Frontend disconnected')
 
 
 def main():
