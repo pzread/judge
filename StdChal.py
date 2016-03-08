@@ -220,8 +220,8 @@ class StdChal:
                     exe_path, argv, envp,
                     test['in'], test['ans'],
                     test['timelimit'], test['memlimit']))
-
             test_result = yield gen.multi(test_future)
+
             ret_result = list()
             for result in test_result:
                 test_pass, data = result
@@ -304,7 +304,7 @@ class StdChal:
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
-            callback(-1)
+            callback(PyExt.DETECT_INTERNALERR)
         else:
             PyExt.start_task(task_id, _done_cb)
 
@@ -356,7 +356,7 @@ class StdChal:
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
-            callback(-1)
+            callback(PyExt.DETECT_INTERNALERR)
         else:
             PyExt.start_task(task_id, _done_cb)
 
@@ -385,7 +385,7 @@ class StdChal:
             '''
 
             callback(stat['detect_error'])
-        
+
         compile_path = self.chal_path + '/compile'
         with StackContext(Privilege.fileaccess):
             os.mkdir(compile_path, mode=0o770)
@@ -409,7 +409,7 @@ class StdChal:
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
-            callback(-1)
+            callback(PyExt.DETECT_INTERNALERR)
         else:
             PyExt.start_task(task_id, _done_cb)
 
@@ -434,14 +434,6 @@ class StdChal:
 
         '''
 
-        with StackContext(Privilege.fileaccess):
-            infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
-            ansfile = open(ans_path, 'rb')
-        outpipe_fd = os.pipe2(os.O_CLOEXEC)
-        fcntl.fcntl(outpipe_fd[0], fcntl.F_SETFL, os.O_NONBLOCK)
-        result_stat = None
-        result_pass = None
-
         def _started_cb(task_id):
             '''Started callback.
 
@@ -457,8 +449,11 @@ class StdChal:
 
             nonlocal infile_fd
             nonlocal outpipe_fd
+
             os.close(infile_fd)
             os.close(outpipe_fd[1])
+            IOLoop.instance().add_handler(outpipe_fd[0], _diff_out, \
+                IOLoop.READ | IOLoop.ERROR)
 
         def _done_cb(task_id, stat):
             '''Done callback.
@@ -534,6 +529,16 @@ class StdChal:
         judge_uid = StdChal.last_judge_uid
         judge_gid = judge_uid
 
+        # Prepare I/O and stat.
+        with StackContext(Privilege.fileaccess):
+            infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
+            ansfile = open(ans_path, 'rb')
+        outpipe_fd = os.pipe2(os.O_CLOEXEC)
+        fcntl.fcntl(outpipe_fd[0], fcntl.F_SETFL, os.O_NONBLOCK)
+        result_stat = None
+        result_pass = None
+
+        # Prepare judge environment.
         with StackContext(Privilege.fileaccess):
             judge_path = self.chal_path + '/run_%d'%judge_uid
             os.mkdir(judge_path, mode=0o771)
@@ -543,9 +548,6 @@ class StdChal:
             os.chown(judge_path + '/a.out', judge_uid, judge_gid)
             os.chmod(judge_path + '/a.out', 0o500)
 
-        IOLoop.instance().add_handler(outpipe_fd[0], _diff_out, \
-            IOLoop.READ | IOLoop.ERROR)
-
         task_id = PyExt.create_task(exe_path, argv, envp, \
             infile_fd, outpipe_fd[1], outpipe_fd[1], \
             '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard', \
@@ -553,9 +555,68 @@ class StdChal:
             PyExt.RESTRICT_LEVEL_HIGH)
 
         if task_id is None:
+            os.close(infile_fd)
+            os.close(outpipe_fd[0])
+            os.close(outpipe_fd[1])
+            ansfile.close()
             callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
+        else:
+            PyExt.start_task(task_id, _done_cb, _started_cb)
 
-        PyExt.start_task(task_id, _done_cb, _started_cb)
+    @concurrent.return_future
+    def prepare_ioredir(self, callback):
+        '''Prepare I/O redirect special judge.
+
+        Args:
+            callback (function): Callback of return_future.
+
+        Returns:
+            None
+
+        '''
+
+        def _done_cb(task_id, stat):
+            '''Done callback.
+
+            Args:
+                task_id (int): Task ID.
+                stat (dict): Task result.
+
+            Returns:
+                None
+
+            '''
+
+            callback(stat['detect_error'])
+
+        # Prepare check environment.
+        check_path = self.chal_path + '/check'
+        self.copydir(self.res_path + '/check', check_path)
+        self.chowndir(check_path, self.check_uid, self.check_gid)
+        with StackContext(Privilege.fullaccess):
+            os.chmod(check_path, mode=0o770)
+        check_inside_path = '/home/%d/check'%self.uniqid
+
+        if not os.path.isfile(check_path + '/init'):
+            callback(PyExt.DETECT_NONE)
+
+        task_id = PyExt.create_task(check_inside_path + '/init', \
+            [], \
+            [
+                'PATH=/usr/bin',
+                'TMPDIR=%s'%check_inside_path,
+                'HOME=%s'%check_inside_path,
+                'LANG=en_US.UTF-8'
+            ], \
+            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
+            check_inside_path, 'container/standard', \
+            self.check_uid, self.check_gid, 60000, 1024 * 1024 * 1024, \
+            PyExt.RESTRICT_LEVEL_LOW)
+
+        if task_id is None:
+            callback(PyExt.DETECT_INTERNALERR)
+        else:
+            PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
     def judge_ioredir(self, src_path, exe_path, argv, envp, in_path, ans_path, \
@@ -578,12 +639,76 @@ class StdChal:
 
         '''
 
+        def _check_started_cb(task_id):
+            '''Check started callback.
+
+            Close unused file descriptor after the check is started.
+
+            Args:
+                task_id (int): Task ID.
+
+            Returns:
+                None
+
+            '''
+
+            nonlocal inpipe_fd
+            nonlocal outpipe_fd
+
+            os.close(inpipe_fd[1])
+            os.close(outpipe_fd[0])
+            os.close(ansfile_fd)
+
+        def _judge_started_cb(task_id):
+            '''Judge started callback.
+
+            Close unused file descriptor after the test is started.
+
+            Args:
+                task_id (int): Task ID.
+
+            Returns:
+                None
+
+            '''
+
+            nonlocal inpipe_fd
+            nonlocal outpipe_fd
+
+            os.close(inpipe_fd[0])
+            os.close(outpipe_fd[1])
+            os.close(outfile_fd)
+
+        StdChal.last_judge_uid += 1
+        judge_uid = StdChal.last_judge_uid
+        judge_gid = judge_uid
         check_path = self.chal_path + '/check'
-        self.copydir(self.res_path + '/check', check_path)
-        self.chowndir(check_path, self.check_uid, self.check_gid)
-        with StackContext(Privilege.fullaccess):
-            os.chmod(check_path, mode=0o770)
         check_inside_path = '/home/%d/check'%self.uniqid
+        judge_path = self.chal_path + '/run_%d'%judge_uid
+        judge_inside_path = '/home/%d/run_%d'%(self.uniqid, judge_uid)
+        output_path = check_path + '/output_%d.txt'%judge_uid
+        output_inside_path = check_inside_path + '/output_%d.txt'%judge_uid
+
+        # Prepare I/O.
+        with StackContext(Privilege.fileaccess):
+            infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
+            ansfile_fd = os.open(ans_path, os.O_RDONLY | os.O_CLOEXEC)
+            outfile_fd = os.open(output_path, \
+                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o660)
+        with StackContext(Privilege.fullaccess):
+            os.chown(output_path, self.check_uid, self.check_gid)
+
+        # Prepare judge environment.
+        with StackContext(Privilege.fileaccess):
+            os.mkdir(judge_path, mode=0o771)
+            shutil.copyfile(src_path, judge_path + '/a.out', \
+                follow_symlinks=False)
+        with StackContext(Privilege.fullaccess):
+            os.chown(judge_path + '/a.out', judge_uid, judge_gid)
+            os.chmod(judge_path + '/a.out', 0o500)
+
+        inpipe_fd = os.pipe2(os.O_CLOEXEC)
+        outpipe_fd = os.pipe2(os.O_CLOEXEC)
 
         check_task_id = PyExt.create_task(check_inside_path + '/main', \
             [], \
@@ -591,12 +716,26 @@ class StdChal:
                 'PATH=/usr/bin',
                 'TMPDIR=%s'%check_inside_path,
                 'HOME=%s'%check_inside_path,
-                'LANG=en_US.UTF-8'
+                'LANG=en_US.UTF-8',
+                'OUTPUT=%s'%('output_%d.txt'%judge_uid)
             ], \
-            infile_fd, outpipe_fd[1], outpipe_fd[1], \
+            outpipe_fd[0], inpipe_fd[1], ansfile_fd, \
             check_inside_path, 'container/standard', \
             self.check_uid, self.check_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if check_task_id is None:
             callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
+            return
+        PyExt.start_task(check_task_id, _done_cb, _check_started_cb)
+
+        judge_task_id = PyExt.create_task(exe_path, argv, envp, \
+            infile_fd, outpipe_fd[1], outpipe_fd[1], \
+            '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard', \
+            judge_uid, judge_gid, timelimit, memlimit, \
+            PyExt.RESTRICT_LEVEL_HIGH)
+
+        if judge_task_id is None:
+            callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
+            return
+        PyExt.start_task(judge_task_id, _done_cb, _judge_started_cb)
