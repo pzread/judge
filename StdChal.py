@@ -88,6 +88,61 @@ class StdChal:
         StdChal.last_compile_uid += 1
         self.compile_uid = StdChal.last_compile_uid
         self.compile_gid = self.compile_uid
+        self.check_uid = self.compile_uid
+        self.check_gid = self.compile_gid
+
+    def copydir(self, src, dst):
+        '''Copy directory.
+
+        Args:
+            src (string): Source path.
+            dst (string): Destination path.
+
+        Returns:
+            None
+
+        '''
+
+        def _copy_fn(src, dst, follow_symlinks=True):
+            '''Copytree helper function.
+
+            Args:
+                src (string): Source path.
+                dst (string): Destination path.
+                follow_symlinks: Follow symbolic link or not.
+
+            Returns:
+                None
+
+            '''
+
+            shutil.copy(src, dst, follow_symlinks=False)
+
+        with StackContext(Privilege.fileaccess):
+            shutil.copytree(src, dst, symlinks=True, copy_function=_copy_fn)
+
+    def chowndir(self, path, uid, gid):
+        '''Change owner of the directory.
+
+        Args:
+            path (string): Directory path.
+            uid (int): UID of the destination files.
+            gid (int): GID of the destination files.
+
+        Returns:
+            None
+
+        '''
+
+        path_set = set([path])
+        for root, dirs, files in os.walk(path, followlinks=False):
+            for name in dirs:
+                path_set.add(os.path.abspath(os.path.join(root, name)))
+            for name in files:
+                path_set.add(os.path.abspath(os.path.join(root, name)))
+        with StackContext(Privilege.fullaccess):
+            for path in path_set:
+                os.chown(path, uid, gid)
 
     @gen.coroutine
     def prefetch(self):
@@ -220,13 +275,12 @@ class StdChal:
 
             callback(stat['detect_error'])
 
+        compile_path = self.chal_path + '/compile'
         with StackContext(Privilege.fileaccess):
-            compile_path = self.chal_path + '/compile'
             os.mkdir(compile_path, mode=0o770)
             shutil.copyfile(self.code_path, compile_path + '/test.cpp', \
                 follow_symlinks=False)
-        with StackContext(Privilege.fullaccess):
-            os.chown(compile_path, self.compile_uid, self.compile_gid)
+        self.chowndir(compile_path, self.compile_uid, self.compile_gid)
 
         if self.comp_typ == 'g++':
             compiler = '/usr/bin/g++'
@@ -266,23 +320,6 @@ class StdChal:
 
         '''
 
-        def _copy_fn(src, dst, follow_symlinks=True):
-            '''Copytree helper function.
-
-            Args:
-                src (string): Source path.
-                dst (string): Destination path.
-                follow_symlinks: Follow symbolic link or not.
-
-            Returns:
-                None
-
-            '''
-
-            shutil.copy(src, dst, follow_symlinks=False)
-            with StackContext(Privilege.fullaccess):
-                os.chown(dst, self.compile_uid, self.compile_gid)
-
         def _done_cb(task_id, stat):
             '''Done callback.
 
@@ -297,14 +334,13 @@ class StdChal:
 
             callback(stat['detect_error'])
 
+        make_path = self.chal_path + '/compile'
+        self.copydir(self.res_path + '/make', make_path)
         with StackContext(Privilege.fileaccess):
-            make_path = self.chal_path + '/compile'
-            shutil.copytree(self.res_path + '/make', make_path, symlinks=True, \
-                copy_function=_copy_fn)
             shutil.copyfile(self.code_path, make_path + '/main.cpp', \
                 follow_symlinks=False)
+        self.chowndir(make_path, self.compile_uid, self.compile_gid)
         with StackContext(Privilege.fullaccess):
-            os.chown(make_path, self.compile_uid, self.compile_gid)
             os.chmod(make_path, mode=0o770)
 
         task_id = PyExt.create_task('/usr/bin/make', \
@@ -349,14 +385,13 @@ class StdChal:
             '''
 
             callback(stat['detect_error'])
-
+        
+        compile_path = self.chal_path + '/compile'
         with StackContext(Privilege.fileaccess):
-            compile_path = self.chal_path + '/compile'
             os.mkdir(compile_path, mode=0o770)
             shutil.copyfile(self.code_path, compile_path + '/test.py', \
                 follow_symlinks=False)
-        with StackContext(Privilege.fullaccess):
-            os.chown(compile_path, self.compile_uid, self.compile_gid)
+        self.chowndir(compile_path, self.compile_uid, self.compile_gid)
 
         task_id = PyExt.create_task('/usr/bin/python3.4', \
             [
@@ -521,3 +556,47 @@ class StdChal:
             callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
 
         PyExt.start_task(task_id, _done_cb, _started_cb)
+
+    @concurrent.return_future
+    def judge_ioredir(self, src_path, exe_path, argv, envp, in_path, ans_path, \
+        timelimit, memlimit, callback):
+        '''I/O redirect special judge.
+
+        Args:
+            src_path (string): Executable source path.
+            exe_path (string): Executable or interpreter path in the sandbox.
+            argv ([string]): List of arguments.
+            envp ([string]): List of environment variables.
+            in_path (string): Input file path.
+            ans_path (string): Answer file path.
+            timelimit (int): Timelimit.
+            memlimit (int): Memlimit.
+            callback (function): Callback of return_future.
+
+        Returns:
+            None
+
+        '''
+
+        check_path = self.chal_path + '/check'
+        self.copydir(self.res_path + '/check', check_path)
+        self.chowndir(check_path, self.check_uid, self.check_gid)
+        with StackContext(Privilege.fullaccess):
+            os.chmod(check_path, mode=0o770)
+        check_inside_path = '/home/%d/check'%self.uniqid
+
+        check_task_id = PyExt.create_task(check_inside_path + '/main', \
+            [], \
+            [
+                'PATH=/usr/bin',
+                'TMPDIR=%s'%check_inside_path,
+                'HOME=%s'%check_inside_path,
+                'LANG=en_US.UTF-8'
+            ], \
+            infile_fd, outpipe_fd[1], outpipe_fd[1], \
+            check_inside_path, 'container/standard', \
+            self.check_uid, self.check_gid, 60000, 1024 * 1024 * 1024, \
+            PyExt.RESTRICT_LEVEL_LOW)
+
+        if check_task_id is None:
+            callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
