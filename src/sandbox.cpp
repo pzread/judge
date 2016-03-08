@@ -291,7 +291,7 @@ void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
     uint64_t suspend_val = 1;
     ptrace(PTRACE_ATTACH, child_pid, NULL, NULL);
     // Resume the process.
-    if(write(suspend_fd, &suspend_val, sizeof(suspend_val))
+    if (write(suspend_fd, &suspend_val, sizeof(suspend_val))
         != sizeof(suspend_val)) {
         ERR("Resume process failed.\n");
     }
@@ -785,6 +785,30 @@ int Sandbox::sandbox_entry(void *data) {
         _exit(-1);
     }
 
+    // Map file descriptors.
+    std::vector<int> skipidxs;
+    std::vector<int> tmpfds;
+    for (i = 0; i < sdbx->config.fd_map.size(); i++) {
+        // First map no conflict fd.
+        if (fcntl(sdbx->config.fd_map[i].first, F_GETFD) == -1) {
+            dup2(sdbx->config.fd_map[i].second, sdbx->config.fd_map[i].first);
+        } else {
+            skipidxs.emplace_back(i);
+        }
+    }
+    for (auto idx : skipidxs) {
+        // Move conflict fd to the empty one.
+        tmpfds.emplace_back( \
+            fcntl(sdbx->config.fd_map[idx].second, F_DUPFD_CLOEXEC, 0));
+    }
+    i = 0;
+    for (auto idx : skipidxs) {
+        // Override conflict fd.
+        dup2(tmpfds[i], sdbx->config.fd_map[idx].first);
+        close(tmpfds[i]);
+        i += 1;
+    }
+
     if (sdbx->install_limit()) {
         _exit(-1);
     }
@@ -792,11 +816,6 @@ int Sandbox::sandbox_entry(void *data) {
         if (sdbx->install_filter()) {
             _exit(-1);
         }
-    }
-
-    // Map file descriptors.
-    for (i = 0; i < sdbx->config.fd_map.size(); i++) {
-        dup2(sdbx->config.fd_map[i].second, sdbx->config.fd_map[i].first);
     }
 
     char **c_argv = new char*[sdbx->argv.size() + 2];
