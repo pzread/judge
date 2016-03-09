@@ -10,6 +10,7 @@ from tornado.ioloop import IOLoop
 import PyExt
 import Privilege
 import Config
+from Utils import FileUtils
 
 
 STATUS_NONE = 0
@@ -29,14 +30,14 @@ class StdChal:
 
     Static attributes:
         last_uniqid (int): Last ID.
-        last_compile_uid (int): Last UID for compile.
+        last_standard_uid (int): Last UID for standard tasks.
         last_judge_uid (int): Last UID for judge.
         null_fd (int): File descriptor of /dev/null.
 
     '''
 
     last_uniqid = 0
-    last_compile_uid = Config.CONTAINER_STANDARD_UID_BASE
+    last_standard_uid = Config.CONTAINER_STANDARD_UID_BASE
     last_judge_uid = Config.CONTAINER_RESTRICT_UID_BASE
     null_fd = None
 
@@ -50,6 +51,11 @@ class StdChal:
             except FileNotFoundError:
                 pass
             os.mkdir('container/standard/home', mode=0o771)
+            try:
+                shutil.rmtree('container/standard/cache')
+            except FileNotFoundError:
+                pass
+            os.mkdir('container/standard/cache', mode=0o771)
 
         ffi = FFI()
         ffi.cdef('''int mount(const char source[], const char target[],
@@ -64,13 +70,20 @@ class StdChal:
 
         StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
 
-    def __init__(self, chal_id, code_path, comp_typ, res_path, test_list):
+    @staticmethod
+    def get_standard_ugid():
+        StdChal.last_standard_uid += 1
+        return (StdChal.last_standard_uid, StdChal.last_standard_uid)
+
+    def __init__(self, chal_id, code_path, comp_typ, judge_typ, res_path, \
+        test_list):
         '''Initialize.
 
         Args:
             chal_id (int): Challenge ID.
             code_path (string): Code path.
             comp_typ (string): Type of compile.
+            judge_typ (string): Type of judge.
             res_path (string): Resource path.
             test_list ([dict]): Test parameter lists.
 
@@ -81,68 +94,13 @@ class StdChal:
         self.code_path = code_path
         self.res_path = res_path
         self.comp_typ = comp_typ
+        self.judge_typ = judge_typ
         self.test_list = test_list
         self.chal_path = None
         self.chal_id = chal_id
 
-        StdChal.last_compile_uid += 1
-        self.compile_uid = StdChal.last_compile_uid
-        self.compile_gid = self.compile_uid
-        self.check_uid = self.compile_uid
-        self.check_gid = self.compile_gid
-
-    def copydir(self, src, dst):
-        '''Copy directory.
-
-        Args:
-            src (string): Source path.
-            dst (string): Destination path.
-
-        Returns:
-            None
-
-        '''
-
-        def _copy_fn(src, dst, follow_symlinks=True):
-            '''Copytree helper function.
-
-            Args:
-                src (string): Source path.
-                dst (string): Destination path.
-                follow_symlinks: Follow symbolic link or not.
-
-            Returns:
-                None
-
-            '''
-
-            shutil.copy(src, dst, follow_symlinks=False)
-
-        with StackContext(Privilege.fileaccess):
-            shutil.copytree(src, dst, symlinks=True, copy_function=_copy_fn)
-
-    def chowndir(self, path, uid, gid):
-        '''Change owner of the directory.
-
-        Args:
-            path (string): Directory path.
-            uid (int): UID of the destination files.
-            gid (int): GID of the destination files.
-
-        Returns:
-            None
-
-        '''
-
-        path_set = set([path])
-        for root, dirs, files in os.walk(path, followlinks=False):
-            for name in dirs:
-                path_set.add(os.path.abspath(os.path.join(root, name)))
-            for name in files:
-                path_set.add(os.path.abspath(os.path.join(root, name)))
-        with StackContext(Privilege.fullaccess):
-            for path in path_set:
-                os.chown(path, uid, gid)
+        StdChal.last_standard_uid += 1
+        self.compile_uid, self.compile_gid = StdChal.get_standard_ugid()
 
     @gen.coroutine
     def prefetch(self):
@@ -175,6 +133,14 @@ class StdChal:
             dict: Challenge result.
 
         '''
+
+        # Check if special judge needs to rebuild.
+        if self.judge_typ == 'ioredir':
+            build_ugid = StdChal.get_standard_ugid()
+            build_relpath = '/cache/x'
+            judge_ioredir = IORedirJudge('container/standard', build_relpath)
+            if not (yield judge_ioredir.build(build_ugid, self.res_path)):
+                return [(0, 0, STATUS_ERR)] * len(self.test_list)
 
         print('StdChal %d started'%self.chal_id)
 
@@ -213,15 +179,20 @@ class StdChal:
                 argv = []
                 envp = []
 
+            # Prepare judge
             test_future = []
-            for test in self.test_list:
-                test_future.append(self.judge_diff(
-                    exefile_path,
-                    exe_path, argv, envp,
-                    test['in'], test['ans'],
-                    test['timelimit'], test['memlimit']))
-            test_result = yield gen.multi(test_future)
+            if self.judge_typ == 'diff':
+                for test in self.test_list:
+                    test_future.append(self.judge_diff(
+                        exefile_path,
+                        exe_path, argv, envp,
+                        test['in'], test['ans'],
+                        test['timelimit'], test['memlimit']))
+            elif self.judge_typ == 'ioredir':
+                pass
 
+            # Emit tests
+            test_result = yield gen.multi(test_future)
             ret_result = list()
             for result in test_result:
                 test_pass, data = result
@@ -280,7 +251,7 @@ class StdChal:
             os.mkdir(compile_path, mode=0o770)
             shutil.copyfile(self.code_path, compile_path + '/test.cpp', \
                 follow_symlinks=False)
-        self.chowndir(compile_path, self.compile_uid, self.compile_gid)
+        FileUtils.chowndir(compile_path, self.compile_uid, self.compile_gid)
 
         if self.comp_typ == 'g++':
             compiler = '/usr/bin/g++'
@@ -335,11 +306,11 @@ class StdChal:
             callback(stat['detect_error'])
 
         make_path = self.chal_path + '/compile'
-        self.copydir(self.res_path + '/make', make_path)
+        FileUtils.copydir(self.res_path + '/make', make_path)
         with StackContext(Privilege.fileaccess):
             shutil.copyfile(self.code_path, make_path + '/main.cpp', \
                 follow_symlinks=False)
-        self.chowndir(make_path, self.compile_uid, self.compile_gid)
+        FileUtils.chowndir(make_path, self.compile_uid, self.compile_gid)
         with StackContext(Privilege.fullaccess):
             os.chmod(make_path, mode=0o770)
 
@@ -391,7 +362,7 @@ class StdChal:
             os.mkdir(compile_path, mode=0o770)
             shutil.copyfile(self.code_path, compile_path + '/test.py', \
                 follow_symlinks=False)
-        self.chowndir(compile_path, self.compile_uid, self.compile_gid)
+        FileUtils.chowndir(compile_path, self.compile_uid, self.compile_gid)
 
         task_id = PyExt.create_task('/usr/bin/python3.4', \
             [
@@ -563,11 +534,37 @@ class StdChal:
         else:
             PyExt.start_task(task_id, _done_cb, _started_cb)
 
+
+class IORedirJudge:
+    '''I/O redirect spcial judge.
+
+    Attributes:
+        container_path (string): Container path.
+        build_relpath (string): Relative build path.
+        build_path (string): Build path.
+   
+    '''
+
+    def __init__(self, container_path, build_relpath):
+        '''Initialize.
+      
+        Args:
+            container_path (string): Container path.
+            build_relpath (string): Relative build path.
+
+        '''
+      
+        self.container_path = container_path
+        self.build_relpath = build_relpath
+        self.build_path = container_path + build_relpath
+
     @concurrent.return_future
-    def prepare_ioredir(self, callback):
-        '''Prepare I/O redirect special judge.
+    def build(self, build_ugid, res_path, callback):
+        '''Build environment.
 
         Args:
+            build_ugid ((int, int)): Build UID/GID.
+            res_path (string): Resource path.
             callback (function): Callback of return_future.
 
         Returns:
@@ -587,34 +584,38 @@ class StdChal:
 
             '''
 
-            callback(stat['detect_error'])
+            if stat['detect_error'] == PyExt.DETECT_NONE:
+                callback(True)
+            else:
+                callback(False)
 
-        # Prepare check environment.
-        check_path = self.chal_path + '/check'
-        self.copydir(self.res_path + '/check', check_path)
-        self.chowndir(check_path, self.check_uid, self.check_gid)
+        build_uid, build_gid = build_ugid
+
+        # Prepare build environment.
+        FileUtils.copydir(res_path + '/check', self.build_path)
+        FileUtils.chowndir(self.build_path, build_uid, build_gid)
         with StackContext(Privilege.fullaccess):
-            os.chmod(check_path, mode=0o770)
-        check_inside_path = '/home/%d/check'%self.uniqid
+            os.chmod(self.build_path, mode=0o770)
 
-        if not os.path.isfile(check_path + '/init'):
-            callback(PyExt.DETECT_NONE)
+        if not os.path.isfile(self.build_path + '/build'):
+            callback(True)
 
-        task_id = PyExt.create_task(check_inside_path + '/init', \
+        # Build.
+        task_id = PyExt.create_task(self.build_relpath + '/build', \
             [], \
             [
                 'PATH=/usr/bin',
-                'TMPDIR=%s'%check_inside_path,
-                'HOME=%s'%check_inside_path,
+                'TMPDIR=%s'%self.build_relpath,
+                'HOME=%s'%self.build_relpath,
                 'LANG=en_US.UTF-8'
             ], \
-            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
-            check_inside_path, 'container/standard', \
-            self.check_uid, self.check_gid, 60000, 1024 * 1024 * 1024, \
+            0, 1, 2, \
+            self.build_relpath, 'container/standard', \
+            build_uid, build_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
-            callback(PyExt.DETECT_INTERNALERR)
+            callback(False)
         else:
             PyExt.start_task(task_id, _done_cb)
 

@@ -1,4 +1,4 @@
-'''Unittest module.'''
+'''I/O redirect special judge unittest module.'''
 
 from tornado import testing
 from tornado.ioloop import IOLoop, PollIOLoop
@@ -16,8 +16,8 @@ class EvIOLoop(PollIOLoop):
         super().initialize(impl=PyExt.EvPoll(), **kwargs)
 
 
-class StdChalCase(testing.AsyncTestCase):
-    '''Run all tests.'''
+class IORedirJudgeCase(testing.AsyncTestCase):
+    '''Run I/O redirect special judge tests.'''
 
     def __init__(self, *args):
         Privilege.init()
@@ -34,7 +34,8 @@ class StdChalCase(testing.AsyncTestCase):
     def test_stdchal(self):
         '''Test g++, A + B problems.'''
 
-        chal = StdChal(1, 'tests/testdata/test.cpp', 'g++', 'tests/testdata', [
+        chal = StdChal(1, 'tests/testdata/test.cpp', 'g++', 'ioredir', \
+            'tests/testdata/res', [
             {
                 'in': 'tests/testdata/in.txt',
                 'ans': 'tests/testdata/ans.txt',
@@ -46,3 +47,4 @@ class StdChalCase(testing.AsyncTestCase):
         for result in result_list:
             _, _, status = result
             self.assertEqual(status, STATUS_AC)
+
