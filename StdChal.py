@@ -136,8 +136,14 @@ class StdChal:
 
         # Check if special judge needs to rebuild.
         if self.judge_typ == 'ioredir':
+            hashproc = process.Subprocess( \
+                ['./HashDir.py', self.res_path + '/check'], \
+                stdout=process.Subprocess.STREAM)
+            dirhash = yield hashproc.stdout.read_until(b'\n')
+            dirhash = int(dirhash.decode('utf-8').rstrip('\n'), 16)
+
             build_ugid = StdChal.get_standard_ugid()
-            build_relpath = '/cache/x'
+            build_relpath = '/cache/%x'%dirhash
             judge_ioredir = IORedirJudge('container/standard', build_relpath)
             if not (yield judge_ioredir.build(build_ugid, self.res_path)):
                 return [(0, 0, STATUS_ERR)] * len(self.test_list)
