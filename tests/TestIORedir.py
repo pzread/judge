@@ -42,7 +42,20 @@ class IORedirJudgeCase(testing.AsyncTestCase):
                 'timelimit': 10000,
                 'memlimit': 256 * 1024 * 1024,
             }
-        ] * 4)
+        ] * 4, {
+            'redir_test': {
+                "testin": 0,
+                "testout": -1,
+                "pipein": -1,
+                "pipeout": 1,
+            },
+            'redir_check': {
+                "testin": -1,
+                "ansin": 2,
+                "pipein": -1,
+                "pipeout": 0,
+            }
+        })
         result_list = yield chal.start()
         self.assertEqual(len(result_list), 4)
         for result in result_list:

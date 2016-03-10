@@ -227,7 +227,7 @@ def init():
     TASK_STOP_CB = task_stop_cb
 
 
-def create_task(exe_path, argv, envp, stdin_fd, stdout_fd, stderr_fd, \
+def create_task(exe_path, argv, envp, fd_mapping, \
     work_path, root_path, uid, gid, timelimit, memlimit, restrict_level):
     '''Create a task.
 
@@ -235,9 +235,7 @@ def create_task(exe_path, argv, envp, stdin_fd, stdout_fd, stderr_fd, \
         exe_path (string): Executable file path.
         argv ([string]): List of arguments.
         envp ([string]): List of environment variables.
-        stdin_fd (int): Standard input file descriptor.
-        stdout_fd (int): Standard output file descriptor.
-        stderr_fd (int): Standard error file descriptor.
+        fd_mapping (dict): File descriptor mapping.
         work_path (string): Working directory.
         root_path (string): Root directory.
         uid (int): UID of sandbox.
@@ -273,13 +271,10 @@ def create_task(exe_path, argv, envp, stdin_fd, stdout_fd, stderr_fd, \
     id_map.gid_num = len(gid_pairs)
     id_map.gid_map = gid_pairs
 
-    fd_pairs = FFI.new('struct fdpair[]', 3)
-    fd_pairs[0].host = stdin_fd
-    fd_pairs[0].guest = 0
-    fd_pairs[1].host = stdout_fd
-    fd_pairs[1].guest = 1
-    fd_pairs[2].host = stderr_fd
-    fd_pairs[2].guest = 2
+    fd_pairs = FFI.new('struct fdpair[]', len(fd_mapping))
+    for idx, fd_pair in enumerate(fd_mapping.items()):
+        fd_pairs[idx].guest = fd_pair[0]
+        fd_pairs[idx].host = fd_pair[1]
     fd_map = FFI.new('struct fdmap*')
     fd_map.num = len(fd_pairs)
     fd_map.map = fd_pairs

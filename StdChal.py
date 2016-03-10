@@ -95,7 +95,7 @@ class StdChal:
         return (StdChal.last_judge_uid, StdChal.last_judge_uid)
 
     def __init__(self, chal_id, code_path, comp_typ, judge_typ, res_path, \
-        test_list):
+        test_list, metadata):
         '''Initialize.
 
         Args:
@@ -105,6 +105,7 @@ class StdChal:
             judge_typ (string): Type of judge.
             res_path (string): Resource path.
             test_list ([dict]): Test parameter lists.
+            metadata (dict): Metadata for judge.
 
         '''
 
@@ -115,6 +116,7 @@ class StdChal:
         self.comp_typ = comp_typ
         self.judge_typ = judge_typ
         self.test_list = test_list
+        self.metadata = metadata
         self.chal_path = None
         self.chal_id = chal_id
 
@@ -224,14 +226,12 @@ class StdChal:
                 for test in self.test_list:
                     check_uid, _ = StdChal.get_standard_ugid()
                     test_uid, test_gid = StdChal.get_restrict_ugid()
-                    test_future.append(judge_ioredir.judge(
-                        exefile_path,
-                        exe_path, argv, envp,
-                        test['in'], test['ans'],
-                        test['timelimit'], test['memlimit'],
+                    test_future.append(judge_ioredir.judge( \
+                        exefile_path, exe_path, argv, envp, \
                         (check_uid, Config.CONTAINER_STANDARD_GID), \
                         (test_uid, test_gid), \
-                        '/home/%d/run_%d'%(self.uniqid, test_uid)))
+                        '/home/%d/run_%d'%(self.uniqid, test_uid), \
+                        test, self.metadata))
 
             # Emit tests
             test_result = yield gen.multi(test_future)
@@ -312,7 +312,11 @@ class StdChal:
                 'PATH=/usr/bin:/bin',
                 'TMPDIR=/home/%d/compile'%self.uniqid,
             ], \
-            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
+            {
+                0: StdChal.null_fd,
+                1: StdChal.null_fd,
+                2: StdChal.null_fd,
+            }, \
             '/home/%d/compile'%self.uniqid, 'container/standard', \
             self.compile_uid, self.compile_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
@@ -364,7 +368,11 @@ class StdChal:
                 'TMPDIR=/home/%d/compile'%self.uniqid,
                 'OUT=./a.out',
             ], \
-            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
+            {
+                0: StdChal.null_fd,
+                1: StdChal.null_fd,
+                2: StdChal.null_fd,
+            }, \
             '/home/%d/compile'%self.uniqid, 'container/standard', \
             self.compile_uid, self.compile_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
@@ -417,7 +425,11 @@ class StdChal:
                 'HOME=/home/%d/compile'%self.uniqid,
                 'LANG=en_US.UTF-8'
             ], \
-            StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
+            {
+                0: StdChal.null_fd,
+                1: StdChal.null_fd,
+                2: StdChal.null_fd,
+            }, \
             '/home/%d/compile'%self.uniqid, 'container/standard', \
             self.compile_uid, self.compile_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
@@ -563,7 +575,11 @@ class StdChal:
             os.chmod(judge_path + '/a.out', 0o500)
 
         task_id = PyExt.create_task(exe_path, argv, envp, \
-            infile_fd, outpipe_fd[1], outpipe_fd[1], \
+            {
+                0: infile_fd,
+                1: outpipe_fd[1],
+                2: outpipe_fd[1],
+            }, \
             '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard', \
             judge_uid, judge_gid, timelimit, memlimit, \
             PyExt.RESTRICT_LEVEL_HIGH)
@@ -654,7 +670,11 @@ class IORedirJudge:
                 'HOME=%s'%self.build_relpath,
                 'LANG=en_US.UTF-8'
             ], \
-            0, 1, 2, \
+            {
+                0: 0,
+                1: 1,
+                2: 2,
+            }, \
             self.build_relpath, 'container/standard', \
             build_uid, build_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
@@ -665,9 +685,8 @@ class IORedirJudge:
             PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
-    def judge(self, src_path, exe_relpath, argv, envp, \
-        in_path, ans_path, timelimit, memlimit, check_ugid, test_ugid, \
-        test_relpath, callback):
+    def judge(self, src_path, exe_relpath, argv, envp, check_ugid, test_ugid, \
+        test_relpath, test_param, metadata, callback):
         '''I/O redirect special judge.
 
         Args:
@@ -675,13 +694,11 @@ class IORedirJudge:
             exe_relpath (string): Executable or interpreter path in the sandbox.
             argv ([string]): List of arguments.
             envp ([string]): List of environment variables.
-            in_path (string): Input file path.
-            ans_path (string): Answer file path.
-            timelimit (int): Timelimit.
-            memlimit (int): Memlimit.
             check_ugid (int, int): Check UID/GID.
             test_ugid (int, int): Test UID/GID.
             test_relpath (string): Test relative path.
+            test_param (dict): Test parameters.
+            metadata (dict): Metadata.
             callback (function): Callback of return_future.
 
         Returns:
@@ -780,6 +797,10 @@ class IORedirJudge:
 
         result_stat = None
         result_pass = None
+        in_path = test_param['in']
+        ans_path = test_param['ans']
+        timelimit= test_param['timelimit']
+        memlimit = test_param['memlimit']
         check_uid, check_gid = check_ugid
         test_uid, test_gid = test_ugid
 
@@ -813,6 +834,33 @@ class IORedirJudge:
         inpipe_fd = os.pipe2(os.O_CLOEXEC)
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
 
+        check_fdmap = {
+            0: StdChal.null_fd,
+            1: StdChal.null_fd,
+            2: StdChal.null_fd,
+        }
+        test_fdmap = {
+            0: StdChal.null_fd,
+            1: StdChal.null_fd,
+            2: StdChal.null_fd,
+        }
+        check_fdmap[metadata['redir_check']['testin']] = infile_fd
+        check_fdmap[metadata['redir_check']['ansin']] = ansfile_fd
+        check_fdmap[metadata['redir_check']['pipein']] = inpipe_fd[1]
+        check_fdmap[metadata['redir_check']['pipeout']] = outpipe_fd[0]
+        try:
+            del check_fdmap[-1]
+        except KeyError:
+            pass
+        test_fdmap[metadata['redir_test']['testin']] = infile_fd
+        test_fdmap[metadata['redir_test']['testout']] = outfile_fd
+        test_fdmap[metadata['redir_test']['pipein']] = inpipe_fd[0]
+        test_fdmap[metadata['redir_test']['pipeout']] = outpipe_fd[1]
+        try:
+            del test_fdmap[-1]
+        except KeyError:
+            pass
+
         check_task_id = PyExt.create_task(self.build_relpath + '/check', \
             [], \
             [
@@ -822,7 +870,7 @@ class IORedirJudge:
                 'OUTPUT=%s'%output_relpath,
                 'VERDICT=%s'%verdict_relpath,
             ], \
-            outpipe_fd[0], inpipe_fd[1], ansfile_fd, \
+            check_fdmap, \
             self.build_relpath, self.container_path, \
             check_uid, check_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
@@ -833,7 +881,7 @@ class IORedirJudge:
         PyExt.start_task(check_task_id, _check_done_cb, _check_started_cb)
 
         test_task_id = PyExt.create_task(exe_relpath, argv, envp, \
-            infile_fd, outpipe_fd[1], outpipe_fd[1], \
+            test_fdmap, \
             test_relpath, self.container_path, \
             test_uid, test_gid, timelimit, memlimit, \
             PyExt.RESTRICT_LEVEL_HIGH)
