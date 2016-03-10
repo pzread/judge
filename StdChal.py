@@ -31,14 +31,27 @@ class StdChal:
     Static attributes:
         last_uniqid (int): Last ID.
         last_standard_uid (int): Last UID for standard tasks.
-        last_judge_uid (int): Last UID for judge.
+        last_restrict_uid (int): Last UID for restricted tasks.
         null_fd (int): File descriptor of /dev/null.
+        build_cache (dict): Cache information of builds.
+        build_cache_refcount (dict): Refcount of build caches.
+
+    Attributes:
+        uniqid (int): Unique ID.
+        code_path (string): Code path.
+        res_path (string): Resource path.
+        comp_typ (string): Type of compile.
+        judge_typ (string): Type of judge.
+        test_list ([dict]): Test parameter lists.
+        metadata (dict): Metadata for judge.
+        chal_id (int): Challenge ID.
+        chal_path (string): Challenge path.
 
     '''
 
     last_uniqid = 0
     last_standard_uid = Config.CONTAINER_STANDARD_UID_BASE
-    last_judge_uid = Config.CONTAINER_RESTRICT_UID_BASE
+    last_restrict_uid = Config.CONTAINER_RESTRICT_UID_BASE
     null_fd = None
 
     @staticmethod
@@ -69,6 +82,8 @@ class StdChal:
                 ffi.NULL)
 
         StdChal.null_fd = os.open('/dev/null', os.O_RDWR | os.O_CLOEXEC)
+        StdChal.build_cache = {}
+        StdChal.build_cache_refcount = {}
 
     @staticmethod
     def get_standard_ugid():
@@ -91,8 +106,80 @@ class StdChal:
 
         '''
 
-        StdChal.last_judge_uid += 1
-        return (StdChal.last_judge_uid, StdChal.last_judge_uid)
+        StdChal.last_restrict_uid += 1
+        return (StdChal.last_restrict_uid, StdChal.last_restrict_uid)
+
+    @staticmethod
+    def build_cache_find(res_path):
+        '''Get build cache.
+
+        Args:
+            res_path (string): Resource path.
+
+        Returns:
+            (string, int): (cache hash, GID) or None if not found.
+
+        '''
+
+        try:
+            return StdChal.build_cache[res_path]
+        except KeyError:
+            return None
+
+    @staticmethod
+    def build_cache_update(res_path, cache_hash, gid):
+        '''Update build cache.
+
+        Args:
+            res_path (string): Resource path.
+            cache_hash (int): Cache hash.
+            gid (int): GID.
+
+        Returns:
+            None
+
+        '''
+
+        ret = StdChal.build_cache_find(res_path)
+        if ret is not None:
+            StdChal.build_cache_decref(ret[0])
+            del StdChal.build_cache[res_path]
+
+        StdChal.build_cache[res_path] = (cache_hash, gid)
+        StdChal.build_cache_refcount[cache_hash] = 1
+
+    @staticmethod
+    def build_cache_incref(cache_hash):
+        '''Increment the refcount of the build cache.
+
+        Args:
+            cache_hash (int): Cache hash.
+
+        Returns:
+            None
+
+        '''
+
+        StdChal.build_cache_refcount[cache_hash] += 1
+
+    @staticmethod
+    def build_cache_decref(cache_hash):
+        '''Decrement the refcount of the build cache.
+
+        Delete the build cache if the refcount = 0.
+
+        Args:
+            cache_hash (int): Cache hash.
+
+        Returns:
+            None
+
+        '''
+
+        StdChal.build_cache_refcount[cache_hash] -= 1
+        if StdChal.build_cache_refcount[cache_hash] == 0:
+            with StackContext(Privilege.fileaccess):
+                shutil.rmtree('container/standard/cache/%x'%cache_hash)
 
     def __init__(self, chal_id, code_path, comp_typ, judge_typ, res_path, \
         test_list, metadata):
@@ -117,8 +204,8 @@ class StdChal:
         self.judge_typ = judge_typ
         self.test_list = test_list
         self.metadata = metadata
-        self.chal_path = None
         self.chal_id = chal_id
+        self.chal_path = None
 
         StdChal.last_standard_uid += 1
         self.compile_uid, self.compile_gid = StdChal.get_standard_ugid()
@@ -155,25 +242,42 @@ class StdChal:
 
         '''
 
+        cache_hash = None
+        cache_gid = None
         # Check if special judge needs to rebuild.
-        if self.judge_typ == 'ioredir':
+        if self.judge_typ in ['ioredir']:
             hashproc = process.Subprocess( \
                 ['./HashDir.py', self.res_path + '/check'], \
                 stdout=process.Subprocess.STREAM)
             dirhash = yield hashproc.stdout.read_until(b'\n')
             dirhash = int(dirhash.decode('utf-8').rstrip('\n'), 16)
-            build_ugid = StdChal.get_standard_ugid()
-            build_relpath = '/cache/%x'%dirhash
-            build_path = 'container/standard' + build_relpath
 
-            judge_ioredir = IORedirJudge('container/standard', build_relpath)
-            if not (yield judge_ioredir.build(build_ugid, self.res_path)):
-                return [(0, 0, STATUS_ERR)] * len(self.test_list)
-            FileUtils.setperm(build_path, \
-                Privilege.JUDGE_UID, Config.CONTAINER_STANDARD_GID, umask=0o750)
-            with StackContext(Privilege.fullaccess):
-                os.chmod(build_path, 0o750)
-            print('StdChal %d built checker'%self.chal_id)
+            ret = StdChal.build_cache_find(self.res_path)
+            if ret is not None and ret[0] == dirhash:
+                cache_hash, cache_gid = ret
+                judge_ioredir = IORedirJudge('container/standard', \
+                    '/cache/%x'%cache_hash)
+
+            else:
+                cache_hash = dirhash
+                _, cache_gid = StdChal.get_standard_ugid()
+                build_ugid = StdChal.get_standard_ugid()
+                build_relpath = '/cache/%x'%cache_hash
+                build_path = 'container/standard' + build_relpath
+
+                judge_ioredir = IORedirJudge('container/standard', \
+                    build_relpath)
+                if not (yield judge_ioredir.build(build_ugid, self.res_path)):
+                    return [(0, 0, STATUS_ERR)] * len(self.test_list)
+                FileUtils.setperm(build_path, \
+                    Privilege.JUDGE_UID, cache_gid, umask=0o750)
+                with StackContext(Privilege.fullaccess):
+                    os.chmod(build_path, 0o750)
+
+                StdChal.build_cache_update(self.res_path, cache_hash, cache_gid)
+                print('StdChal %d built checker %x'%(self.chal_id, cache_hash))
+
+            StdChal.build_cache_incref(cache_hash)
 
         print('StdChal %d started'%self.chal_id)
 
@@ -228,7 +332,7 @@ class StdChal:
                     test_uid, test_gid = StdChal.get_restrict_ugid()
                     test_future.append(judge_ioredir.judge( \
                         exefile_path, exe_path, argv, envp, \
-                        (check_uid, Config.CONTAINER_STANDARD_GID), \
+                        (check_uid, cache_gid), \
                         (test_uid, test_gid), \
                         '/home/%d/run_%d'%(self.uniqid, test_uid), \
                         test, self.metadata))
@@ -259,6 +363,8 @@ class StdChal:
             return ret_result
 
         finally:
+            if cache_hash is not None:
+                StdChal.build_cache_decref(cache_hash)
             with StackContext(Privilege.fileaccess):
                 shutil.rmtree(self.chal_path)
             print('StdChal %d done'%self.chal_id)
@@ -551,9 +657,7 @@ class StdChal:
                 if result_stat is not None:
                     callback((result_pass, result_stat))
 
-        StdChal.last_judge_uid += 1
-        judge_uid = StdChal.last_judge_uid
-        judge_gid = judge_uid
+        judge_uid, judge_gid = StdChal.get_restrict_ugid()
 
         # Prepare I/O and stat.
         with StackContext(Privilege.fileaccess):
@@ -722,13 +826,17 @@ class IORedirJudge:
             nonlocal inpipe_fd
             nonlocal outpipe_fd
             nonlocal ansfile_fd
+            nonlocal check_infile_fd
 
             os.close(inpipe_fd[1])
             os.close(outpipe_fd[0])
-            os.close(ansfile_fd)
+            if ansfile_fd is not None:
+                os.close(ansfile_fd)
+            if check_infile_fd is not None:
+                os.close(check_infile_fd)
 
         def _test_started_cb(task_id):
-            '''Judge started callback.
+            '''Test started callback.
 
             Close unused file descriptor after the test is started.
 
@@ -743,10 +851,13 @@ class IORedirJudge:
             nonlocal inpipe_fd
             nonlocal outpipe_fd
             nonlocal outfile_fd
+            nonlocal test_infile_fd
 
             os.close(inpipe_fd[0])
             os.close(outpipe_fd[1])
             os.close(outfile_fd)
+            if test_infile_fd is not None:
+                os.close(test_infile_fd)
 
         def _done_cb():
             '''Done callback.'''
@@ -821,8 +932,16 @@ class IORedirJudge:
 
         # Prepare I/O.
         with StackContext(Privilege.fileaccess):
-            infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
-            ansfile_fd = os.open(ans_path, os.O_RDONLY | os.O_CLOEXEC)
+            try:
+                check_infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
+                test_infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
+            except FileNotFoundError:
+                check_infile_fd = None
+                test_infile_fd = None
+            try:
+                ansfile_fd = os.open(ans_path, os.O_RDONLY | os.O_CLOEXEC)
+            except FileNotFoundError:
+                ansfile_fd = None
             outfile_fd = os.open(output_path, \
                 os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400)
             os.close(os.open(verdict_path, \
@@ -834,6 +953,7 @@ class IORedirJudge:
         inpipe_fd = os.pipe2(os.O_CLOEXEC)
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
 
+        # Set file descriptor mapping.
         check_fdmap = {
             0: StdChal.null_fd,
             1: StdChal.null_fd,
@@ -844,15 +964,18 @@ class IORedirJudge:
             1: StdChal.null_fd,
             2: StdChal.null_fd,
         }
-        check_fdmap[metadata['redir_check']['testin']] = infile_fd
-        check_fdmap[metadata['redir_check']['ansin']] = ansfile_fd
+        if check_infile_fd is not None:
+            check_fdmap[metadata['redir_check']['testin']] = check_infile_fd
+        if ansfile_fd is not None:
+            check_fdmap[metadata['redir_check']['ansin']] = ansfile_fd
         check_fdmap[metadata['redir_check']['pipein']] = inpipe_fd[1]
         check_fdmap[metadata['redir_check']['pipeout']] = outpipe_fd[0]
         try:
             del check_fdmap[-1]
         except KeyError:
             pass
-        test_fdmap[metadata['redir_test']['testin']] = infile_fd
+        if test_infile_fd is not None:
+            test_fdmap[metadata['redir_test']['testin']] = test_infile_fd
         test_fdmap[metadata['redir_test']['testout']] = outfile_fd
         test_fdmap[metadata['redir_test']['pipein']] = inpipe_fd[0]
         test_fdmap[metadata['redir_test']['pipeout']] = outpipe_fd[1]
