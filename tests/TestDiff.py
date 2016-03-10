@@ -35,14 +35,15 @@ class DiffJugeCase(testing.AsyncTestCase):
         '''Test g++, A + B problems.'''
 
         chal = StdChal(1, 'tests/testdata/test.cpp', 'g++', 'diff', \
-            'tests/testdata', [
-            {
-                'in': 'tests/testdata/in.txt',
-                'ans': 'tests/testdata/ans.txt',
-                'timelimit': 10000,
-                'memlimit': 256 * 1024 * 1024,
-            }
-        ] * 4, {})
+            'tests/testdata', \
+            [
+                {
+                    'in': 'tests/testdata/in.txt',
+                    'ans': 'tests/testdata/ans.txt',
+                    'timelimit': 10000,
+                    'memlimit': 256 * 1024 * 1024,
+                }
+            ] * 4, {})
         result_list = yield chal.start()
         self.assertEqual(len(result_list), 4)
         for result in result_list:

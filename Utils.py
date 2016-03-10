@@ -3,8 +3,8 @@
 
 import os
 import shutil
-import Privilege
 from tornado.stack_context import StackContext
+import Privilege
 
 
 class FileUtils:

@@ -78,7 +78,8 @@ class JudgeHandler(WebSocketHandler):
                         'memlimit': memlimit,
                     })
 
-            chal = StdChal(chal_id, code_path, comp_type, res_path, test_paramlist)
+            chal = StdChal(chal_id, code_path, comp_type, 'diff', \
+                res_path, test_paramlist, {})
             result_list = yield chal.start()
 
             idx = 0

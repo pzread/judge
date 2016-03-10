@@ -264,7 +264,7 @@ class StdChal:
             print('StdChal %d done'%self.chal_id)
 
     @concurrent.return_future
-    def comp_cxx(self, callback):
+    def comp_cxx(self, callback=None):
         '''GCC, Clang compile.
 
         Args:
@@ -327,7 +327,7 @@ class StdChal:
             PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
-    def comp_make(self, callback):
+    def comp_make(self, callback=None):
         '''Makefile compile.
 
         Args:
@@ -383,7 +383,7 @@ class StdChal:
             PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
-    def comp_python(self, callback):
+    def comp_python(self, callback=None):
         '''Python3.4 compile.
 
         Args:
@@ -441,7 +441,7 @@ class StdChal:
 
     @concurrent.return_future
     def judge_diff(self, src_path, exe_path, argv, envp, in_path, ans_path, \
-        timelimit, memlimit, callback):
+        timelimit, memlimit, callback=None):
         '''Diff judge.
 
         Args:
@@ -618,7 +618,7 @@ class IORedirJudge:
         self.build_path = container_path + build_relpath
 
     @concurrent.return_future
-    def build(self, build_ugid, res_path, callback):
+    def build(self, build_ugid, res_path, callback=None):
         '''Build environment.
 
         Args:
@@ -686,7 +686,7 @@ class IORedirJudge:
 
     @concurrent.return_future
     def judge(self, src_path, exe_relpath, argv, envp, check_ugid, test_ugid, \
-        test_relpath, test_param, metadata, callback):
+        test_relpath, test_param, metadata, callback=None):
         '''I/O redirect special judge.
 
         Args:
@@ -750,7 +750,7 @@ class IORedirJudge:
 
         def _done_cb():
             '''Done callback.'''
-            
+
             nonlocal result_stat
             nonlocal result_pass
 
@@ -791,7 +791,7 @@ class IORedirJudge:
             '''
 
             nonlocal result_stat
-            
+
             result_stat = (stat['utime'], stat['peakmem'], stat['detect_error'])
             _done_cb()
 
@@ -799,7 +799,7 @@ class IORedirJudge:
         result_pass = None
         in_path = test_param['in']
         ans_path = test_param['ans']
-        timelimit= test_param['timelimit']
+        timelimit = test_param['timelimit']
         memlimit = test_param['memlimit']
         check_uid, check_gid = check_ugid
         test_uid, test_gid = test_ugid
@@ -825,8 +825,8 @@ class IORedirJudge:
             ansfile_fd = os.open(ans_path, os.O_RDONLY | os.O_CLOEXEC)
             outfile_fd = os.open(output_path, \
                 os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400)
-            verfile_fd = os.open(verdict_path, \
-                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400)
+            os.close(os.open(verdict_path, \
+                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400))
         with StackContext(Privilege.fullaccess):
             os.chown(output_path, check_uid, check_gid)
             os.chown(verdict_path, check_uid, check_gid)

@@ -259,10 +259,10 @@ def create_task(exe_path, argv, envp, fd_mapping, \
         ffi_envp.append(FFI.new('char[]', env.encode('utf-8')))
     ffi_envp.append(FFI.NULL)
 
-    uid_pairs = FFI.new('struct uidpair[]', 1);
+    uid_pairs = FFI.new('struct uidpair[]', 1)
     uid_pairs[0].host = uid
     uid_pairs[0].guest = uid
-    gid_pairs = FFI.new('struct gidpair[]', 1);
+    gid_pairs = FFI.new('struct gidpair[]', 1)
     gid_pairs[0].host = gid
     gid_pairs[0].guest = gid
     id_map = FFI.new('struct idmap*')
