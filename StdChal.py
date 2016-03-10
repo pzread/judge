@@ -82,6 +82,18 @@ class StdChal:
         StdChal.last_standard_uid += 1
         return (StdChal.last_standard_uid, StdChal.last_standard_uid)
 
+    @staticmethod
+    def get_restrict_ugid():
+        '''Generate restrict UID/GID.
+
+        Returns:
+            (int, int): Restrict UID/GID
+
+        '''
+
+        StdChal.last_judge_uid += 1
+        return (StdChal.last_judge_uid, StdChal.last_judge_uid)
+
     def __init__(self, chal_id, code_path, comp_typ, judge_typ, res_path, \
         test_list):
         '''Initialize.
@@ -209,7 +221,17 @@ class StdChal:
                         test['in'], test['ans'],
                         test['timelimit'], test['memlimit']))
             elif self.judge_typ == 'ioredir':
-                pass
+                for test in self.test_list:
+                    check_uid, _ = StdChal.get_standard_ugid()
+                    test_uid, test_gid = StdChal.get_restrict_ugid()
+                    test_future.append(judge_ioredir.judge(
+                        exefile_path,
+                        exe_path, argv, envp,
+                        test['in'], test['ans'],
+                        test['timelimit'], test['memlimit'],
+                        (check_uid, Config.CONTAINER_STANDARD_GID), \
+                        (test_uid, test_gid), \
+                        '/home/%d/run_%d'%(self.uniqid, test_uid)))
 
             # Emit tests
             test_result = yield gen.multi(test_future)
@@ -643,7 +665,7 @@ class IORedirJudge:
             PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
-    def judge_ioredir(self, src_path, exe_relpath, argv, envp, \
+    def judge(self, src_path, exe_relpath, argv, envp, \
         in_path, ans_path, timelimit, memlimit, check_ugid, test_ugid, \
         test_relpath, callback):
         '''I/O redirect special judge.
@@ -682,12 +704,13 @@ class IORedirJudge:
 
             nonlocal inpipe_fd
             nonlocal outpipe_fd
+            nonlocal ansfile_fd
 
             os.close(inpipe_fd[1])
             os.close(outpipe_fd[0])
             os.close(ansfile_fd)
 
-        def _judge_started_cb(task_id):
+        def _test_started_cb(task_id):
             '''Judge started callback.
 
             Close unused file descriptor after the test is started.
@@ -702,36 +725,90 @@ class IORedirJudge:
 
             nonlocal inpipe_fd
             nonlocal outpipe_fd
+            nonlocal outfile_fd
 
             os.close(inpipe_fd[0])
             os.close(outpipe_fd[1])
             os.close(outfile_fd)
 
+        def _done_cb():
+            '''Done callback.'''
+            
+            nonlocal result_stat
+            nonlocal result_pass
+
+            if result_pass is not None and result_stat is not None:
+                callback((result_pass, result_stat))
+                return
+
+        def _check_done_cb(task_id, stat):
+            '''Check done callback.
+
+            Args:
+                task_id (int): Task ID.
+                stat (dict): Task result.
+
+            Returns:
+                None
+
+            '''
+
+            nonlocal result_pass
+
+            if stat['detect_error'] == PyExt.DETECT_NONE:
+                result_pass = True
+            else:
+                result_pass = False
+            _done_cb()
+
+        def _test_done_cb(task_id, stat):
+            '''Test done callback.
+
+            Args:
+                task_id (int): Task ID.
+                stat (dict): Task result.
+
+            Returns:
+                None
+
+            '''
+
+            nonlocal result_stat
+            
+            result_stat = (stat['utime'], stat['peakmem'], stat['detect_error'])
+            _done_cb()
+
+        result_stat = None
+        result_pass = None
         check_uid, check_gid = check_ugid
         test_uid, test_gid = test_ugid
 
-        check_path = self.container_path + check_relpath
         test_path = self.container_path + test_relpath
         output_relpath = test_relpath + '/output.txt'
         output_path = self.container_path + output_relpath
+        verdict_relpath = test_relpath + '/verdict.txt'
+        verdict_path = self.container_path + verdict_relpath
+
+        # Prepare test environment.
+        with StackContext(Privilege.fileaccess):
+            os.mkdir(test_path, mode=0o771)
+            shutil.copyfile(src_path, test_path + '/a.out', \
+                follow_symlinks=False)
+        with StackContext(Privilege.fullaccess):
+            os.chown(test_path + '/a.out', test_uid, test_gid)
+            os.chmod(test_path + '/a.out', 0o500)
 
         # Prepare I/O.
         with StackContext(Privilege.fileaccess):
             infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
             ansfile_fd = os.open(ans_path, os.O_RDONLY | os.O_CLOEXEC)
             outfile_fd = os.open(output_path, \
-                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o440)
+                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400)
+            verfile_fd = os.open(verdict_path, \
+                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400)
         with StackContext(Privilege.fullaccess):
             os.chown(output_path, check_uid, check_gid)
-
-        # Prepare test environment.
-        with StackContext(Privilege.fileaccess):
-            os.mkdir(judge_path, mode=0o771)
-            shutil.copyfile(src_path, test_path + '/a.out', \
-                follow_symlinks=False)
-        with StackContext(Privilege.fullaccess):
-            os.chown(judge_path + '/a.out', test_uid, test_gid)
-            os.chmod(judge_path + '/a.out', 0o500)
+            os.chown(verdict_path, check_uid, check_gid)
 
         inpipe_fd = os.pipe2(os.O_CLOEXEC)
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
@@ -742,7 +819,8 @@ class IORedirJudge:
                 'PATH=/usr/bin:/bin',
                 'HOME=%s'%self.build_relpath,
                 'LANG=en_US.UTF-8',
-                'OUTPUT=%s'%output_relpath
+                'OUTPUT=%s'%output_relpath,
+                'VERDICT=%s'%verdict_relpath,
             ], \
             outpipe_fd[0], inpipe_fd[1], ansfile_fd, \
             self.build_relpath, self.container_path, \
@@ -752,15 +830,15 @@ class IORedirJudge:
         if check_task_id is None:
             callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
             return
-        PyExt.start_task(check_task_id, _done_cb, _check_started_cb)
+        PyExt.start_task(check_task_id, _check_done_cb, _check_started_cb)
 
-        judge_task_id = PyExt.create_task(exe_path, argv, envp, \
+        test_task_id = PyExt.create_task(exe_relpath, argv, envp, \
             infile_fd, outpipe_fd[1], outpipe_fd[1], \
-            '/home/%d/run_%d'%(self.uniqid, judge_uid), 'container/standard', \
-            judge_uid, judge_gid, timelimit, memlimit, \
+            test_relpath, self.container_path, \
+            test_uid, test_gid, timelimit, memlimit, \
             PyExt.RESTRICT_LEVEL_HIGH)
 
-        if judge_task_id is None:
+        if test_task_id is None:
             callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
             return
-        PyExt.start_task(judge_task_id, _done_cb, _judge_started_cb)
+        PyExt.start_task(test_task_id, _test_done_cb, _test_started_cb)
