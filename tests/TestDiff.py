@@ -42,7 +42,7 @@ class DiffJugeCase(testing.AsyncTestCase):
                 'timelimit': 10000,
                 'memlimit': 256 * 1024 * 1024,
             }
-        ] * 4)
+        ] * 4, {})
         result_list = yield chal.start()
         self.assertEqual(len(result_list), 4)
         for result in result_list:
