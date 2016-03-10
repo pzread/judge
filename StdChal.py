@@ -775,9 +775,9 @@ class IORedirJudge:
                 'LANG=en_US.UTF-8'
             ], \
             {
-                0: 0,
-                1: 1,
-                2: 2,
+                0: StdChal.null_fd,
+                1: StdChal.null_fd,
+                2: StdChal.null_fd,
             }, \
             self.build_relpath, 'container/standard', \
             build_uid, build_gid, 60000, 1024 * 1024 * 1024, \

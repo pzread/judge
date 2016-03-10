@@ -61,11 +61,13 @@ class JudgeHandler(WebSocketHandler):
 
             test_paramlist = list()
             comp_type = test_list[0]['comp_type']
+            check_type = test_list[0]['check_type']
             assert comp_type in ['g++', 'clang++', 'makefile', 'python3']
+            assert check_type in ['diff', 'ioredir']
 
             for test in test_list:
                 assert test['comp_type'] == comp_type
-                assert test['check_type'] == 'diff'
+                assert test['check_type'] == check_type
                 test_idx = test['test_idx']
                 memlimit = test['memlimit']
                 timelimit = test['timelimit']
@@ -78,8 +80,9 @@ class JudgeHandler(WebSocketHandler):
                         'memlimit': memlimit,
                     })
 
-            chal = StdChal(chal_id, code_path, comp_type, 'diff', \
-                res_path, test_paramlist, {})
+            print(test['metadata'])
+            chal = StdChal(chal_id, code_path, comp_type, check_type, \
+                res_path, test_paramlist, test['metadata'])
             result_list = yield chal.start()
 
             idx = 0
