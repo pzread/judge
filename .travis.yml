@@ -19,4 +19,5 @@ install:
     - docker build -t judge --build-arg TRAVIS_COMMIT="$TRAVIS_COMMIT" .
 
 script:
-    - docker run --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 -m tornado.test.runtests tests.TestAll'
+    - docker run --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 -m tornado.test.runtests tests.TestDiff'
+    - docker run --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 -m tornado.test.runtests tests.TestIORedir'

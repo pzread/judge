@@ -2,6 +2,7 @@
 
 umask 022
 
+mkdir -p $1/bin
 mkdir -p $1/usr/bin
 mkdir -p $1/usr/lib
 mkdir -p $1/lib
@@ -9,6 +10,7 @@ mkdir -p $1/lib64
 mkdir -p $1/proc
 mkdir -p $1/dev
 
+cp /bin/sh $1/bin/sh
 cp /usr/bin/g++ $1/usr/bin/g++
 cp -a /usr/bin/clang++ $1/usr/bin/clang++
 cp /usr/bin/as $1/usr/bin/as
