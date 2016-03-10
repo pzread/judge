@@ -44,6 +44,7 @@ class IORedirJudgeCase(testing.AsyncTestCase):
             }
         ] * 4)
         result_list = yield chal.start()
+        self.assertEqual(len(result_list), 4)
         for result in result_list:
             _, _, status = result
             self.assertEqual(status, STATUS_AC)

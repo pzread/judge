@@ -72,6 +72,13 @@ class StdChal:
 
     @staticmethod
     def get_standard_ugid():
+        '''Generate standard UID/GID.
+
+        Returns:
+            (int, int): Standard UID/GID
+
+        '''
+
         StdChal.last_standard_uid += 1
         return (StdChal.last_standard_uid, StdChal.last_standard_uid)
 
@@ -141,37 +148,44 @@ class StdChal:
                 stdout=process.Subprocess.STREAM)
             dirhash = yield hashproc.stdout.read_until(b'\n')
             dirhash = int(dirhash.decode('utf-8').rstrip('\n'), 16)
-
             build_ugid = StdChal.get_standard_ugid()
             build_relpath = '/cache/%x'%dirhash
+            build_path = 'container/standard' + build_relpath
+
             judge_ioredir = IORedirJudge('container/standard', build_relpath)
             if not (yield judge_ioredir.build(build_ugid, self.res_path)):
                 return [(0, 0, STATUS_ERR)] * len(self.test_list)
+            FileUtils.setperm(build_path, \
+                Privilege.JUDGE_UID, Config.CONTAINER_STANDARD_GID, umask=0o750)
+            with StackContext(Privilege.fullaccess):
+                os.chmod(build_path, 0o750)
+            print('StdChal %d built checker'%self.chal_id)
 
         print('StdChal %d started'%self.chal_id)
 
+        # Create challenge environment.
         self.chal_path = 'container/standard/home/%d'%self.uniqid
         with StackContext(Privilege.fileaccess):
             os.mkdir(self.chal_path, mode=0o771)
 
-        yield self.prefetch()
-        print('StdChal %d prefetched'%self.chal_id)
+        try:
+            yield self.prefetch()
+            print('StdChal %d prefetched'%self.chal_id)
 
-        if self.comp_typ in ['g++', 'clang++']:
-            ret = yield self.comp_cxx()
+            if self.comp_typ in ['g++', 'clang++']:
+                ret = yield self.comp_cxx()
 
-        elif self.comp_typ == 'makefile':
-            ret = yield self.comp_make()
+            elif self.comp_typ == 'makefile':
+                ret = yield self.comp_make()
 
-        elif self.comp_typ == 'python3':
-            ret = yield self.comp_python()
+            elif self.comp_typ == 'python3':
+                ret = yield self.comp_python()
 
-        if ret != PyExt.DETECT_NONE:
-            ret_result = [(0, 0, STATUS_CE)] * len(self.test_list)
-
-        else:
+            if ret != PyExt.DETECT_NONE:
+                return [(0, 0, STATUS_CE)] * len(self.test_list)
             print('StdChal %d compiled'%self.chal_id)
 
+            # Prepare test arguments
             if self.comp_typ == 'python3':
                 exefile_path = self.chal_path \
                     + '/compile/__pycache__/test.cpython-34.pyc'
@@ -220,11 +234,12 @@ class StdChal:
                     status = STATUS_ERR
                 ret_result.append((runtime, peakmem, status))
 
-        with StackContext(Privilege.fileaccess):
-            shutil.rmtree(self.chal_path)
+            return ret_result
 
-        print('StdChal %d done'%self.chal_id)
-        return ret_result
+        finally:
+            with StackContext(Privilege.fileaccess):
+                shutil.rmtree(self.chal_path)
+            print('StdChal %d done'%self.chal_id)
 
     @concurrent.return_future
     def comp_cxx(self, callback):
@@ -257,7 +272,7 @@ class StdChal:
             os.mkdir(compile_path, mode=0o770)
             shutil.copyfile(self.code_path, compile_path + '/test.cpp', \
                 follow_symlinks=False)
-        FileUtils.chowndir(compile_path, self.compile_uid, self.compile_gid)
+        FileUtils.setperm(compile_path, self.compile_uid, self.compile_gid)
 
         if self.comp_typ == 'g++':
             compiler = '/usr/bin/g++'
@@ -272,7 +287,7 @@ class StdChal:
                 './test.cpp',
             ], \
             [
-                'PATH=/usr/bin',
+                'PATH=/usr/bin:/bin',
                 'TMPDIR=/home/%d/compile'%self.uniqid,
             ], \
             StdChal.null_fd, StdChal.null_fd, StdChal.null_fd, \
@@ -316,14 +331,14 @@ class StdChal:
         with StackContext(Privilege.fileaccess):
             shutil.copyfile(self.code_path, make_path + '/main.cpp', \
                 follow_symlinks=False)
-        FileUtils.chowndir(make_path, self.compile_uid, self.compile_gid)
+        FileUtils.setperm(make_path, self.compile_uid, self.compile_gid)
         with StackContext(Privilege.fullaccess):
             os.chmod(make_path, mode=0o770)
 
         task_id = PyExt.create_task('/usr/bin/make', \
             [], \
             [
-                'PATH=/usr/bin',
+                'PATH=/usr/bin:/bin',
                 'TMPDIR=/home/%d/compile'%self.uniqid,
                 'OUT=./a.out',
             ], \
@@ -368,7 +383,7 @@ class StdChal:
             os.mkdir(compile_path, mode=0o770)
             shutil.copyfile(self.code_path, compile_path + '/test.py', \
                 follow_symlinks=False)
-        FileUtils.chowndir(compile_path, self.compile_uid, self.compile_gid)
+        FileUtils.setperm(compile_path, self.compile_uid, self.compile_gid)
 
         task_id = PyExt.create_task('/usr/bin/python3.4', \
             [
@@ -548,18 +563,18 @@ class IORedirJudge:
         container_path (string): Container path.
         build_relpath (string): Relative build path.
         build_path (string): Build path.
-   
+
     '''
 
     def __init__(self, container_path, build_relpath):
         '''Initialize.
-      
+
         Args:
             container_path (string): Container path.
             build_relpath (string): Relative build path.
 
         '''
-      
+
         self.container_path = container_path
         self.build_relpath = build_relpath
         self.build_path = container_path + build_relpath
@@ -599,18 +614,20 @@ class IORedirJudge:
 
         # Prepare build environment.
         FileUtils.copydir(res_path + '/check', self.build_path)
-        FileUtils.chowndir(self.build_path, build_uid, build_gid)
+        FileUtils.setperm(self.build_path, build_uid, build_gid)
         with StackContext(Privilege.fullaccess):
             os.chmod(self.build_path, mode=0o770)
 
-        if not os.path.isfile(self.build_path + '/build'):
-            callback(True)
+        with StackContext(Privilege.fileaccess):
+            if not os.path.isfile(self.build_path + '/build'):
+                callback(True)
+                return
 
         # Build.
         task_id = PyExt.create_task(self.build_relpath + '/build', \
             [], \
             [
-                'PATH=/usr/bin',
+                'PATH=/usr/bin:/bin',
                 'TMPDIR=%s'%self.build_relpath,
                 'HOME=%s'%self.build_relpath,
                 'LANG=en_US.UTF-8'
@@ -626,19 +643,23 @@ class IORedirJudge:
             PyExt.start_task(task_id, _done_cb)
 
     @concurrent.return_future
-    def judge_ioredir(self, src_path, exe_path, argv, envp, in_path, ans_path, \
-        timelimit, memlimit, callback):
+    def judge_ioredir(self, src_path, exe_relpath, argv, envp, \
+        in_path, ans_path, timelimit, memlimit, check_ugid, test_ugid, \
+        test_relpath, callback):
         '''I/O redirect special judge.
 
         Args:
             src_path (string): Executable source path.
-            exe_path (string): Executable or interpreter path in the sandbox.
+            exe_relpath (string): Executable or interpreter path in the sandbox.
             argv ([string]): List of arguments.
             envp ([string]): List of environment variables.
             in_path (string): Input file path.
             ans_path (string): Answer file path.
             timelimit (int): Timelimit.
             memlimit (int): Memlimit.
+            check_ugid (int, int): Check UID/GID.
+            test_ugid (int, int): Test UID/GID.
+            test_relpath (string): Test relative path.
             callback (function): Callback of return_future.
 
         Returns:
@@ -686,49 +707,46 @@ class IORedirJudge:
             os.close(outpipe_fd[1])
             os.close(outfile_fd)
 
-        StdChal.last_judge_uid += 1
-        judge_uid = StdChal.last_judge_uid
-        judge_gid = judge_uid
-        check_path = self.chal_path + '/check'
-        check_inside_path = '/home/%d/check'%self.uniqid
-        judge_path = self.chal_path + '/run_%d'%judge_uid
-        judge_inside_path = '/home/%d/run_%d'%(self.uniqid, judge_uid)
-        output_path = check_path + '/output_%d.txt'%judge_uid
-        output_inside_path = check_inside_path + '/output_%d.txt'%judge_uid
+        check_uid, check_gid = check_ugid
+        test_uid, test_gid = test_ugid
+
+        check_path = self.container_path + check_relpath
+        test_path = self.container_path + test_relpath
+        output_relpath = test_relpath + '/output.txt'
+        output_path = self.container_path + output_relpath
 
         # Prepare I/O.
         with StackContext(Privilege.fileaccess):
             infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
             ansfile_fd = os.open(ans_path, os.O_RDONLY | os.O_CLOEXEC)
             outfile_fd = os.open(output_path, \
-                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o660)
+                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o440)
         with StackContext(Privilege.fullaccess):
-            os.chown(output_path, self.check_uid, self.check_gid)
+            os.chown(output_path, check_uid, check_gid)
 
-        # Prepare judge environment.
+        # Prepare test environment.
         with StackContext(Privilege.fileaccess):
             os.mkdir(judge_path, mode=0o771)
-            shutil.copyfile(src_path, judge_path + '/a.out', \
+            shutil.copyfile(src_path, test_path + '/a.out', \
                 follow_symlinks=False)
         with StackContext(Privilege.fullaccess):
-            os.chown(judge_path + '/a.out', judge_uid, judge_gid)
+            os.chown(judge_path + '/a.out', test_uid, test_gid)
             os.chmod(judge_path + '/a.out', 0o500)
 
         inpipe_fd = os.pipe2(os.O_CLOEXEC)
         outpipe_fd = os.pipe2(os.O_CLOEXEC)
 
-        check_task_id = PyExt.create_task(check_inside_path + '/main', \
+        check_task_id = PyExt.create_task(self.build_relpath + '/check', \
             [], \
             [
-                'PATH=/usr/bin',
-                'TMPDIR=%s'%check_inside_path,
-                'HOME=%s'%check_inside_path,
+                'PATH=/usr/bin:/bin',
+                'HOME=%s'%self.build_relpath,
                 'LANG=en_US.UTF-8',
-                'OUTPUT=%s'%('output_%d.txt'%judge_uid)
+                'OUTPUT=%s'%output_relpath
             ], \
             outpipe_fd[0], inpipe_fd[1], ansfile_fd, \
-            check_inside_path, 'container/standard', \
-            self.check_uid, self.check_gid, 60000, 1024 * 1024 * 1024, \
+            self.build_relpath, self.container_path, \
+            check_uid, check_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if check_task_id is None:

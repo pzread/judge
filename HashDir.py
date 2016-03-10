@@ -15,13 +15,13 @@ def main():
             pathlist.append(os.path.join(root, name))
         for name in files:
             pathlist.append(os.path.join(root, name))
-    
+
     pathlist.sort()
-    md = hashlib.sha256()
+    allmd = hashlib.sha256()
     for path in pathlist:
         tmpmd = hashlib.sha256()
         tmpmd.update(path.encode('utf-8'))
-        md.update(tmpmd.digest())
+        allmd.update(tmpmd.digest())
         if os.path.isfile(path) and not os.path.islink(path):
             regf = open(path, 'rb')
             tmpmd = hashlib.sha256()
@@ -30,8 +30,8 @@ def main():
                 if len(data) <= 0:
                     break
                 tmpmd.update(data)
-            md.update(tmpmd.digest())
-    print(md.hexdigest())
+            allmd.update(tmpmd.digest())
+    print(allmd.hexdigest())
 
 
 if __name__ == '__main__':
