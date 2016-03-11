@@ -81,7 +81,7 @@ class JudgeHandler(WebSocketHandler):
 
             chal = StdChal(chal_id, code_path, comp_type, check_type, \
                 res_path, test_paramlist, metadata)
-            result_list = yield chal.start()
+            result_list, verdict = yield chal.start()
 
             result = []
             idx = 0
@@ -108,7 +108,7 @@ class JudgeHandler(WebSocketHandler):
 
             websk.write_message(json.dumps({
                 'chal_id': chal_id,
-                'verdict': '',
+                'verdict': verdict,
                 'result': result,
             }))
 

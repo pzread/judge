@@ -291,16 +291,16 @@ class StdChal:
             print('StdChal %d prefetched'%self.chal_id)
 
             if self.comp_typ in ['g++', 'clang++']:
-                ret = yield self.comp_cxx()
+                ret, verdict = yield self.comp_cxx()
 
             elif self.comp_typ == 'makefile':
-                ret = yield self.comp_make()
+                ret, verdict = yield self.comp_make()
 
             elif self.comp_typ == 'python3':
-                ret = yield self.comp_python()
+                ret, verdict = yield self.comp_python()
 
             if ret != PyExt.DETECT_NONE:
-                return [(0, 0, STATUS_CE)] * len(self.test_list)
+                return [(0, 0, STATUS_CE)] * len(self.test_list), verdict
             print('StdChal %d compiled'%self.chal_id)
 
             # Prepare test arguments
@@ -360,7 +360,7 @@ class StdChal:
                     status = STATUS_ERR
                 ret_result.append((runtime, peakmem, status))
 
-            return ret_result
+            return ret_result, ''
 
         finally:
             if cache_hash is not None:
@@ -381,6 +381,23 @@ class StdChal:
 
         '''
 
+        def _started_cb(task_id):
+            '''Started callback.
+
+            Close unused file descriptors after the task is started.
+
+            Args:
+                task_id (int): Task ID.
+
+            Returns:
+                None
+
+            '''
+
+            nonlocal errpipe_fd
+
+            os.close(errpipe_fd)
+
         def _done_cb(task_id, stat):
             '''Done callback.
 
@@ -393,7 +410,13 @@ class StdChal:
 
             '''
 
-            callback(stat['detect_error'])
+            nonlocal compile_path
+
+            with StackContext(Privilege.fileaccess):
+                verfile = open(compile_path + '/verdict.txt', 'r')
+                verdict = verfile.read(140)
+                verfile.close()
+            callback((stat['detect_error'], verdict))
 
         compile_path = self.chal_path + '/compile'
         with StackContext(Privilege.fileaccess):
@@ -401,6 +424,10 @@ class StdChal:
             shutil.copyfile(self.code_path, compile_path + '/test.cpp', \
                 follow_symlinks=False)
         FileUtils.setperm(compile_path, self.compile_uid, self.compile_gid)
+
+        with StackContext(Privilege.fileaccess):
+            errpipe_fd = os.open(compile_path + '/verdict.txt', \
+                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o440)
 
         if self.comp_typ == 'g++':
             compiler = '/usr/bin/g++'
@@ -421,16 +448,18 @@ class StdChal:
             {
                 0: StdChal.null_fd,
                 1: StdChal.null_fd,
-                2: StdChal.null_fd,
+                2: errpipe_fd,
             }, \
             '/home/%d/compile'%self.uniqid, 'container/standard', \
             self.compile_uid, self.compile_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
+            os.close(errpipe_fd)
             callback(PyExt.DETECT_INTERNALERR)
-        else:
-            PyExt.start_task(task_id, _done_cb)
+            return
+
+        PyExt.start_task(task_id, _done_cb, _started_cb)
 
     @concurrent.return_future
     def comp_make(self, callback=None):
@@ -456,7 +485,7 @@ class StdChal:
 
             '''
 
-            callback(stat['detect_error'])
+            callback((stat['detect_error'], ''))
 
         make_path = self.chal_path + '/compile'
         FileUtils.copydir(self.res_path + '/make', make_path)
@@ -500,6 +529,23 @@ class StdChal:
 
         '''
 
+        def _started_cb(task_id):
+            '''Started callback.
+
+            Close unused file descriptors after the task is started.
+
+            Args:
+                task_id (int): Task ID.
+
+            Returns:
+                None
+
+            '''
+
+            nonlocal errpipe_fd
+
+            os.close(errpipe_fd)
+
         def _done_cb(task_id, stat):
             '''Done callback.
 
@@ -512,7 +558,13 @@ class StdChal:
 
             '''
 
-            callback(stat['detect_error'])
+            nonlocal compile_path
+
+            with StackContext(Privilege.fileaccess):
+                verfile = open(compile_path + '/verdict.txt', 'r')
+                verdict = verfile.read(140)
+                verfile.close()
+            callback((stat['detect_error'], verdict))
 
         compile_path = self.chal_path + '/compile'
         with StackContext(Privilege.fileaccess):
@@ -520,6 +572,10 @@ class StdChal:
             shutil.copyfile(self.code_path, compile_path + '/test.py', \
                 follow_symlinks=False)
         FileUtils.setperm(compile_path, self.compile_uid, self.compile_gid)
+
+        with StackContext(Privilege.fileaccess):
+            errpipe_fd = os.open(compile_path + '/verdict.txt', \
+                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o440)
 
         task_id = PyExt.create_task('/usr/bin/python3.4', \
             [
@@ -534,16 +590,18 @@ class StdChal:
             {
                 0: StdChal.null_fd,
                 1: StdChal.null_fd,
-                2: StdChal.null_fd,
+                2: errpipe_fd,
             }, \
             '/home/%d/compile'%self.uniqid, 'container/standard', \
             self.compile_uid, self.compile_gid, 60000, 1024 * 1024 * 1024, \
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
+            os.close(errpipe_fd)
             callback(PyExt.DETECT_INTERNALERR)
-        else:
-            PyExt.start_task(task_id, _done_cb)
+            return
+
+        PyExt.start_task(task_id, _done_cb, _started_cb)
 
     @concurrent.return_future
     def judge_diff(self, src_path, exe_path, argv, envp, in_path, ans_path, \
@@ -569,7 +627,7 @@ class StdChal:
         def _started_cb(task_id):
             '''Started callback.
 
-            Close unused file descriptor after the task is started.
+            Close unused file descriptors after the task is started.
 
             Args:
                 task_id (int): Task ID.
@@ -813,7 +871,7 @@ class IORedirJudge:
         def _check_started_cb(task_id):
             '''Check started callback.
 
-            Close unused file descriptor after the check is started.
+            Close unused file descriptors after the check is started.
 
             Args:
                 task_id (int): Task ID.
@@ -838,7 +896,7 @@ class IORedirJudge:
         def _test_started_cb(task_id):
             '''Test started callback.
 
-            Close unused file descriptor after the test is started.
+            Close unused file descriptors after the test is started.
 
             Args:
                 task_id (int): Task ID.
