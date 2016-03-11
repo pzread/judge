@@ -31,6 +31,4 @@ I/O Redirect
 
 ``${TESTDATA_ID}`` are IDs of testdata used in the test. The judge will access testdata by opening ``${PRODIR}/res/testdata/data${TESTDATA_ID}.in`` and ``${PRODIR}/res/testdata/data${TESTDATA_ID}.out``.
 
-Each ``${TARGET_FD}`` is the individual target file descriptor which the corresponding soruce redirect to. Setting to -1 means do not redirect the source.
-
 The test program needs to pass all testdata to get accepted. The ``runtime`` is the overall ``user time`` of all runs. The ``peakmem`` is the highest memory usage of all runs.

@@ -150,6 +150,16 @@ class JudgeHandler(WebSocketHandler):
         print('Frontend disconnected')
 
 
+class APIHandler(WebSocketHandler):
+    '''Judge request handler.
+
+    Static attributes:
+        chal_running_count (int): Number of current running challenges.
+        chal_queue (deque): Pending challenges.
+
+    '''
+
+
 def main():
     '''Main function.'''
 
