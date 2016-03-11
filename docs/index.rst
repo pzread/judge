@@ -62,7 +62,7 @@ Run Tests
 .. code::
 
    cd judge
-   sudo python3 -m tornado.test.runtests tests.TestAll
+   sudo python3 -m tornado.test.runtests tests.TestDiff
 
 
 .. _`Use Docker`: 
