@@ -1,3 +1,10 @@
-2015-04-58  PZ Read	<netfirewall@gmail.com>
+2016-03-11  PZ Read	<netfirewall@gmail.com>
 
-    * *.* (added): Everything is new.
+    * Support I/O redirect special judge.
+    * Support compile error report.
+    * Dockerize.
+    * Add draft APIs.
+
+2016-02-24  PZ Read	<netfirewall@gmail.com>
+
+    * Everything is new.
