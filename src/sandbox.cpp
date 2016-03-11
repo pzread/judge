@@ -520,8 +520,8 @@ int Sandbox::install_limit() const {
         if (setrlimit(RLIMIT_NPROC, &lim)) {
             return -1;
         }
-        lim.rlim_cur = 4;
-        lim.rlim_max = 4;
+        lim.rlim_cur = 64;
+        lim.rlim_max = 64;
         if (setrlimit(RLIMIT_NOFILE, &lim)) {
             return -1;
         }
