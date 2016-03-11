@@ -508,6 +508,11 @@ int Sandbox::install_limit() const {
     if (setrlimit(RLIMIT_STACK, &lim)) {
         return -1;
     }
+    lim.rlim_cur = 1073741824;
+    lim.rlim_max = 1073741824;
+    if (setrlimit(RLIMIT_FSIZE, &lim)) {
+        return -1;
+    }
     if (config.restrict_level == SANDBOX_RESTRICT_LOW) {
         lim.rlim_cur = 64;
         lim.rlim_max = 64;
