@@ -53,57 +53,68 @@ class JudgeHandler(WebSocketHandler):
 
         '''
 
-        chal_id = obj['chal_id']
-        code_path = '/srv/nfs' + obj['code_path'][4:]
-        test_list = obj['testl']
-        res_path = '/srv/nfs' + obj['res_path'][4:]
+        try:
+            chal_id = obj['chal_id']
+            code_path = obj['code_path']
+            res_path = obj['res_path']
+            test_list = obj['test']
+            metadata = obj['metadata']
+            comp_type = obj['comp_type']
+            check_type = obj['check_type']
 
-        test_paramlist = list()
-        comp_type = test_list[0]['comp_type']
-        assert comp_type in ['g++', 'clang++', 'makefile', 'python3']
+            test_paramlist = list()
+            assert comp_type in ['g++', 'clang++', 'makefile', 'python3']
+            assert check_type in ['diff', 'ioredir']
 
-        for test in test_list:
-            assert test['comp_type'] == comp_type
-            assert test['check_type'] == 'diff'
-            test_idx = test['test_idx']
-            memlimit = test['memlimit']
-            timelimit = test['timelimit']
-            data_ids = test['metadata']['data']
-            for data_id in data_ids:
-                test_paramlist.append({
-                    'in': res_path + '/testdata/%d.in'%data_id,
-                    'ans': res_path + '/testdata/%d.out'%data_id,
-                    'timelimit': timelimit,
-                    'memlimit': memlimit,
+            for test in test_list:
+                test_idx = test['test_idx']
+                memlimit = test['memlimit']
+                timelimit = test['timelimit']
+                data_ids = test['metadata']['data']
+                for data_id in data_ids:
+                    test_paramlist.append({
+                        'in': res_path + '/testdata/%d.in'%data_id,
+                        'ans': res_path + '/testdata/%d.out'%data_id,
+                        'timelimit': timelimit,
+                        'memlimit': memlimit,
+                    })
+
+            chal = StdChal(chal_id, code_path, comp_type, check_type, \
+                res_path, test_paramlist, metadata)
+            result_list, verdict = yield chal.start()
+
+            result = []
+            idx = 0
+            for test in test_list:
+                test_idx = test['test_idx']
+                data_ids = test['metadata']['data']
+                total_runtime = 0
+                total_mem = 0
+                total_status = 0
+                for data_id in data_ids:
+                    runtime, peakmem, status = result_list[idx]
+                    total_runtime += runtime
+                    total_mem += peakmem
+                    total_status = max(total_status, status)
+                    idx += 1
+
+                result.append({
+                    'test_idx': test_idx,
+                    'state': total_status,
+                    'runtime': total_runtime,
+                    'peakmem': total_mem,
+                    'verdict': ''
                 })
-
-        chal = StdChal(chal_id, code_path, comp_type, res_path, test_paramlist)
-        result_list = yield chal.start()
-
-        idx = 0
-        for test in test_list:
-            test_idx = test['test_idx']
-            data_ids = test['metadata']['data']
-            total_runtime = 0
-            total_mem = 0
-            total_status = 0
-            for data_id in data_ids:
-                runtime, peakmem, status = result_list[idx]
-                total_runtime += runtime
-                total_mem += peakmem
-                total_status = max(total_status, status)
-                idx += 1
 
             websk.write_message(json.dumps({
                 'chal_id': chal_id,
-                'test_idx': test_idx,
-                'state': total_status,
-                'runtime': total_runtime,
-                'memory': total_mem,
+                'verdict': verdict,
+                'result': result,
             }))
 
-        JudgeHandler.chal_running_count -= 1
-        JudgeHandler.emit_chal()
+        finally:
+            JudgeHandler.chal_running_count -= 1
+            JudgeHandler.emit_chal()
 
     @staticmethod
     def emit_chal(obj=None, websk=None):
@@ -130,7 +141,7 @@ class JudgeHandler(WebSocketHandler):
     def open(self):
         '''Handle open event'''
 
-        pass
+        print('Frontend connected')
 
     def on_message(self, msg):
         '''Handle message event'''
@@ -141,7 +152,7 @@ class JudgeHandler(WebSocketHandler):
     def on_close(self):
         '''Handle close event'''
 
-        pass
+        print('Frontend disconnected')
 
 
 def main():

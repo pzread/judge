@@ -1,10 +1,10 @@
-'''Unittest module.'''
+'''Diff judge unittest module.'''
 
 from tornado import testing
 from tornado.ioloop import IOLoop, PollIOLoop
 import PyExt
 import Privilege
-from StdChal import StdChal
+from StdChal import StdChal, STATUS_AC
 
 
 class EvIOLoop(PollIOLoop):
@@ -16,8 +16,8 @@ class EvIOLoop(PollIOLoop):
         super().initialize(impl=PyExt.EvPoll(), **kwargs)
 
 
-class StdChalCase(testing.AsyncTestCase):
-    '''Run all tests.'''
+class DiffJugeCase(testing.AsyncTestCase):
+    '''Run diff judge tests.'''
 
     def __init__(self, *args):
         Privilege.init()
@@ -34,15 +34,19 @@ class StdChalCase(testing.AsyncTestCase):
     def test_stdchal(self):
         '''Test g++, A + B problems.'''
 
-        chal = StdChal(1, 'tests/testdata/test.cpp', 'g++', 'tests/testdata', [
-            {
-                'in': 'tests/testdata/in.txt',
-                'ans': 'tests/testdata/ans.txt',
-                'timelimit': 10000,
-                'memlimit': 256 * 1024 * 1024,
-            }
-        ] * 4)
-        result_list = yield chal.start()
+        chal = StdChal(1, 'tests/testdata/test.cpp', 'g++', 'diff', \
+            'tests/testdata', \
+            [
+                {
+                    'in': 'tests/testdata/in.txt',
+                    'ans': 'tests/testdata/ans.txt',
+                    'timelimit': 10000,
+                    'memlimit': 256 * 1024 * 1024,
+                }
+            ] * 4, {})
+        result_list, verdict = yield chal.start()
+        self.assertEqual(len(result_list), 4)
         for result in result_list:
             _, _, status = result
-            self.assertEqual(status, 1)
+            self.assertEqual(status, STATUS_AC)
+

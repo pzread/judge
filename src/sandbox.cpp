@@ -291,7 +291,10 @@ void Sandbox::start(func_sandbox_stop_callback _stop_callback) {
     uint64_t suspend_val = 1;
     ptrace(PTRACE_ATTACH, child_pid, NULL, NULL);
     // Resume the process.
-    write(suspend_fd, &suspend_val, sizeof(suspend_val));
+    if (write(suspend_fd, &suspend_val, sizeof(suspend_val))
+        != sizeof(suspend_val)) {
+        ERR("Resume process failed.\n");
+    }
 }
 
 /*!
@@ -505,6 +508,11 @@ int Sandbox::install_limit() const {
     if (setrlimit(RLIMIT_STACK, &lim)) {
         return -1;
     }
+    lim.rlim_cur = 1073741824;
+    lim.rlim_max = 1073741824;
+    if (setrlimit(RLIMIT_FSIZE, &lim)) {
+        return -1;
+    }
     if (config.restrict_level == SANDBOX_RESTRICT_LOW) {
         lim.rlim_cur = 64;
         lim.rlim_max = 64;
@@ -517,8 +525,8 @@ int Sandbox::install_limit() const {
         if (setrlimit(RLIMIT_NPROC, &lim)) {
             return -1;
         }
-        lim.rlim_cur = 4;
-        lim.rlim_max = 4;
+        lim.rlim_cur = 64;
+        lim.rlim_max = 64;
         if (setrlimit(RLIMIT_NOFILE, &lim)) {
             return -1;
         }
@@ -749,6 +757,7 @@ The sandboxed process entry.
 
 */
 int Sandbox::sandbox_entry(void *data) {
+    unsigned int i;
     uint64_t id = (uint64_t)data;
     auto sdbx_it = sandbox_map.find(id);
     assert(sdbx_it != sandbox_map.end());
@@ -781,6 +790,30 @@ int Sandbox::sandbox_entry(void *data) {
         _exit(-1);
     }
 
+    // Map file descriptors.
+    std::vector<int> skipidxs;
+    std::vector<int> tmpfds;
+    for (i = 0; i < sdbx->config.fd_map.size(); i++) {
+        // First map no conflict fd.
+        if (fcntl(sdbx->config.fd_map[i].first, F_GETFD) == -1) {
+            dup2(sdbx->config.fd_map[i].second, sdbx->config.fd_map[i].first);
+        } else {
+            skipidxs.emplace_back(i);
+        }
+    }
+    for (auto idx : skipidxs) {
+        // Move conflict fd to the empty one.
+        tmpfds.emplace_back( \
+            fcntl(sdbx->config.fd_map[idx].second, F_DUPFD_CLOEXEC, 0));
+    }
+    i = 0;
+    for (auto idx : skipidxs) {
+        // Override conflict fd.
+        dup2(tmpfds[i], sdbx->config.fd_map[idx].first);
+        close(tmpfds[i]);
+        i += 1;
+    }
+
     if (sdbx->install_limit()) {
         _exit(-1);
     }
@@ -790,11 +823,6 @@ int Sandbox::sandbox_entry(void *data) {
         }
     }
 
-    dup2(sdbx->config.stdin_fd, 0);
-    dup2(sdbx->config.stdout_fd, 1);
-    dup2(sdbx->config.stderr_fd, 2);
-
-    unsigned int i;
     char **c_argv = new char*[sdbx->argv.size() + 2];
     char **c_envp = new char*[sdbx->envp.size() + 1];
     auto c_exe_path = strdup(sdbx->exe_path.c_str());

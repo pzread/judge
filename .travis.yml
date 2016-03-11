@@ -1,24 +1,23 @@
 sudo: required
 dist: trusty
 language: cpp
-
-addons:
-    apt:
-        sources:
-        - ubuntu-toolchain-r-test
-        - llvm-toolchain-precise-3.6
-        packages:
-        - clang-3.6
+service: 
+    - docker
 
 before_install:
-    - sudo apt-get install -y build-essential cmake libcgroup-dev
+    - sudo apt-get update
+    - sudo apt-get install -y apt-transport-https ca-certificates
+    - sudo apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070ADBF76221572C52609D
+    - echo 'deb https://apt.dockerproject.org/repo ubuntu-trusty main' | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    - sudo apt-get update
+    - sudo apt-get -o Dpkg::Options::="--force-confold" install -y docker-engine
+    - echo 'DOCKER_OPTS="-H tcp://127.0.0.1:2375 -H unix:///var/run/docker.sock -s devicemapper"' | sudo tee /etc/default/docker > /dev/null
+    - sudo service docker restart
+    - sleep 5
 
 install:
-    - mkdir lib
-
-before_script:
-    - cd lib
+    - docker build -t judge --build-arg TRAVIS_COMMIT="$TRAVIS_COMMIT" .
 
 script:
-    - CC=clang-3.6 CXX=clang++-3.6 cmake ..
-    - make
+    - docker run --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 -m tornado.test.runtests tests.TestDiff'
+    - docker run --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 -m tornado.test.runtests tests.TestIORedir'

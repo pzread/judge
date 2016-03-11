@@ -145,6 +145,34 @@ def init():
             int detect_error;
         };
     ''')
+    FFI.cdef('''
+        typedef int uid_t;
+        typedef int gid_t;
+        struct uidpair {
+            uid_t host;
+            uid_t guest;
+        };
+        struct gidpair {
+            gid_t host;
+            gid_t guest;
+        };
+        struct idmap {
+            unsigned int uid_num;
+            unsigned int gid_num;
+            struct uidpair *uid_map;
+            struct gidpair *gid_map;
+        };
+    ''')
+    FFI.cdef('''
+        struct fdpair {
+            int host;
+            int guest;
+        };
+        struct fdmap {
+            unsigned int num;
+            struct fdpair *map;
+        };
+    ''')
     FFI.cdef('''int init();''')
     FFI.cdef('''void destroy();''')
     FFI.cdef('''int ext_register(int fd, int events);''')
@@ -153,9 +181,9 @@ def init():
     FFI.cdef('''int ext_poll(pollpair[], int timeout);''')
     FFI.cdef('''uint64_t create_task(
         char exe_path[], char *argv[], char *envp[], 
-        int stdin_fd, int stdout_fd, int stderr_fd, 
         char work_path[], char root_path[], 
-        unsigned int uid, unsigned int gid, 
+        unsigned int uid, unsigned int gid,
+        struct idmap *id_map, struct fdmap *fd_map,
         uint64_t timelimit, uint64_t memlimit, 
         int restrict_level);''')
     FFI.cdef('''int start_task(uint64_t id,
@@ -199,7 +227,7 @@ def init():
     TASK_STOP_CB = task_stop_cb
 
 
-def create_task(exe_path, argv, envp, stdin_fd, stdout_fd, stderr_fd, \
+def create_task(exe_path, argv, envp, fd_mapping, \
     work_path, root_path, uid, gid, timelimit, memlimit, restrict_level):
     '''Create a task.
 
@@ -207,9 +235,7 @@ def create_task(exe_path, argv, envp, stdin_fd, stdout_fd, stderr_fd, \
         exe_path (string): Executable file path.
         argv ([string]): List of arguments.
         envp ([string]): List of environment variables.
-        stdin_fd (int): Standard input file descriptor.
-        stdout_fd (int): Standard output file descriptor.
-        stderr_fd (int): Standard error file descriptor.
+        fd_mapping (dict): File descriptor mapping.
         work_path (string): Working directory.
         root_path (string): Root directory.
         uid (int): UID of sandbox.
@@ -233,13 +259,32 @@ def create_task(exe_path, argv, envp, stdin_fd, stdout_fd, stderr_fd, \
         ffi_envp.append(FFI.new('char[]', env.encode('utf-8')))
     ffi_envp.append(FFI.NULL)
 
+    uid_pairs = FFI.new('struct uidpair[]', 1)
+    uid_pairs[0].host = uid
+    uid_pairs[0].guest = uid
+    gid_pairs = FFI.new('struct gidpair[]', 1)
+    gid_pairs[0].host = gid
+    gid_pairs[0].guest = gid
+    id_map = FFI.new('struct idmap*')
+    id_map.uid_num = len(uid_pairs)
+    id_map.uid_map = uid_pairs
+    id_map.gid_num = len(gid_pairs)
+    id_map.gid_map = gid_pairs
+
+    fd_pairs = FFI.new('struct fdpair[]', len(fd_mapping))
+    for idx, fd_pair in enumerate(fd_mapping.items()):
+        fd_pairs[idx].guest = fd_pair[0]
+        fd_pairs[idx].host = fd_pair[1]
+    fd_map = FFI.new('struct fdmap*')
+    fd_map.num = len(fd_pairs)
+    fd_map.map = fd_pairs
+
     task_id = FFILIB.create_task(
         FFI.new('char[]', exe_path.encode('utf-8')),
         ffi_argv, ffi_envp,
-        stdin_fd, stdout_fd, stderr_fd,
         FFI.new('char[]', work_path.encode('utf-8')),
         FFI.new('char[]', root_path.encode('utf-8')),
-        uid, gid, timelimit, memlimit, restrict_level)
+        uid, gid, id_map, fd_map, timelimit, memlimit, restrict_level)
 
     if task_id == 0:
         return None
