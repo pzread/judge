@@ -1,6 +1,13 @@
 TestOJ Websocket APIs
 ================================
 
+The judge will start a websocket server at port 2501.
+
+Sending a `Challenge Request`_ to ``ws://${SERVER_IP}:2501/judge`` will start a challenge. And the result will be sent back by the same websocket connection.
+
+
+.. _`Challenge Request`:
+
 Challenge Request JSON Format
 ---------------------
 
