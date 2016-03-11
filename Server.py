@@ -55,19 +55,18 @@ class JudgeHandler(WebSocketHandler):
 
         try:
             chal_id = obj['chal_id']
-            code_path = '/srv/nfs' + obj['code_path'][4:]
-            test_list = obj['testl']
-            res_path = '/srv/nfs' + obj['res_path'][4:]
+            code_path = obj['code_path']
+            res_path = obj['res_path']
+            test_list = obj['test']
+            metadata = obj['metadata']
+            comp_type = obj['comp_type']
+            check_type = obj['check_type']
 
             test_paramlist = list()
-            comp_type = test_list[0]['comp_type']
-            check_type = test_list[0]['check_type']
             assert comp_type in ['g++', 'clang++', 'makefile', 'python3']
             assert check_type in ['diff', 'ioredir']
 
             for test in test_list:
-                assert test['comp_type'] == comp_type
-                assert test['check_type'] == check_type
                 test_idx = test['test_idx']
                 memlimit = test['memlimit']
                 timelimit = test['timelimit']
@@ -80,11 +79,11 @@ class JudgeHandler(WebSocketHandler):
                         'memlimit': memlimit,
                     })
 
-            print(test['metadata'])
             chal = StdChal(chal_id, code_path, comp_type, check_type, \
-                res_path, test_paramlist, test['metadata'])
+                res_path, test_paramlist, metadata)
             result_list = yield chal.start()
 
+            result = []
             idx = 0
             for test in test_list:
                 test_idx = test['test_idx']
@@ -99,13 +98,19 @@ class JudgeHandler(WebSocketHandler):
                     total_status = max(total_status, status)
                     idx += 1
 
-                websk.write_message(json.dumps({
-                    'chal_id': chal_id,
+                result.append({
                     'test_idx': test_idx,
                     'state': total_status,
                     'runtime': total_runtime,
-                    'memory': total_mem,
-                }))
+                    'peakmem': total_mem,
+                    'verdict': ''
+                })
+
+            websk.write_message(json.dumps({
+                'chal_id': chal_id,
+                'verdict': '',
+                'result': result,
+            }))
 
         finally:
             JudgeHandler.chal_running_count -= 1
@@ -148,16 +153,6 @@ class JudgeHandler(WebSocketHandler):
         '''Handle close event'''
 
         print('Frontend disconnected')
-
-
-class APIHandler(WebSocketHandler):
-    '''Judge request handler.
-
-    Static attributes:
-        chal_running_count (int): Number of current running challenges.
-        chal_queue (deque): Pending challenges.
-
-    '''
 
 
 def main():

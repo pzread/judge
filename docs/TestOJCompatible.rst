@@ -11,11 +11,14 @@ Challenge Request JSON Format
         "chal_id": ${CHALLENGE_ID},
         "code_path": ${CODE_PATH},
         "res_path": ${RES_PATH},
-        "comp_type": ${COMP_TYPE},
-        "check_type": ${CHECK_TYPE},
+        "comp_type": "c++"|"clang++"|"makefile"|"python3",
+        "check_type": "diff"|"ioredir",
         "metadata": ${CHALMETA},
         "test": [${TEST},...]
     }
+
+
+For details of ``check_type``, see `Diff Check Type`_, `IORedir Check Type`_.
 
 
 Challenge Response JSON Format
@@ -31,6 +34,9 @@ Challenge Response JSON Format
     }
 
 
+The compile error message will be stored at ``verdict``.
+
+
 Test JSON Format
 ----------------
 
@@ -38,10 +44,14 @@ Test JSON Format
 
     ${TEST}
     {
+        "test_idx": ${TESTIDX},
         "timelimit": ${TIMELIMIT},
         "memlimit": ${MEMLIMIT},
         "metadata": ${TESTMETA}
     }
+
+
+The unit of ``timelimit`` is msec. The unit of ``memlimit`` is byte.
 
 
 Result JSON Format
@@ -51,12 +61,18 @@ Result JSON Format
 
     ${RESULT}
     {
+        "test_idx": ${TESTIDX},
         "state": ${STATE},
         "runtime": ${RUNTIME},
         "peakmem": ${PEAKMEM},
         "verdict": ${VERDICT}
     }
 
+
+The ``runtime`` is the overall ``user time`` of all runs. The ``peakmem`` is the highest memory usage of all runs.
+
+
+.. _`Diff Check Type`: 
 
 Diff Check Type
 ---------------
@@ -73,7 +89,7 @@ The ``${TESTMETA}`` format.
 
 ``${TESTDATA_ID}`` are IDs of testdata used in the test. The judge will access testdata by opening ``${RES_PATH}/testdata/data${TESTDATA_ID}.in`` and ``${RES_PATH}/testdata/data${TESTDATA_ID}.out``.
 
-The file structure of ``${RES_PATH}`` directory.
+The directory structure of ``${RES_PATH}``.
 
 .. code::
 
@@ -84,16 +100,17 @@ The file structure of ``${RES_PATH}`` directory.
             ...
 
 
+.. _`IORedir Check Type`: 
+
 IORedir Check Type
 ------------------
 
-The ``${TESTMETA}`` format.
+The ``${CHALMETA}`` format.
 
 .. code:: python
     
-    ${TESTMETA}
+    ${CHALMETA}
     {
-        "data": [${TESTDATA_ID},...],
         "redir_test": {
             "testin": -1|${TARGET_FD},
             "testout": -1|${TARGET_FD},
@@ -109,11 +126,21 @@ The ``${TESTMETA}`` format.
     }
 
 
+The ``${TESTMETA}`` format.
+
+.. code:: python
+    
+    ${TESTMETA}
+    {
+        "data": [${TESTDATA_ID},...]
+    }
+
+
 Each ``${TARGET_FD}`` is the individual target file descriptor which the corresponding soruce redirect to. Setting to -1 means do not redirect the source.
 
 ``${TESTDATA_ID}`` are IDs of testdata used in the test. The judge will access testdata by opening ``${RES_PATH}/testdata/data${TESTDATA_ID}.in`` and ``${RES_PATH}/testdata/data${TESTDATA_ID}.out``.
 
-The file structure of ``${RES_PATH}`` directory.
+The directory structure of ``${RES_PATH}``.
 
 .. code::
 
