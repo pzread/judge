@@ -32,7 +32,7 @@ class IORedirJudgeCase(testing.AsyncTestCase):
 
     @testing.gen_test(timeout=60)
     def test_stdchal(self):
-        '''Test g++, A + B problems.'''
+        '''Test g++, I/O redirect special judge.'''
 
         chal = StdChal(1, 'tests/testdata/test.cpp', 'g++', 'ioredir', \
             'tests/testdata/res', [
@@ -57,7 +57,7 @@ class IORedirJudgeCase(testing.AsyncTestCase):
                 }
             } \
         )
-        result_list = yield chal.start()
+        result_list, verdict = yield chal.start()
         self.assertEqual(len(result_list), 4)
         for result in result_list:
             _, _, status = result
