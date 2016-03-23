@@ -94,7 +94,7 @@ The ``${TESTMETA}`` format.
     }
 
 
-``${TESTDATA_ID}`` are IDs of testdata used in the test. The judge will access testdata by opening ``${RES_PATH}/testdata/data${TESTDATA_ID}.in`` and ``${RES_PATH}/testdata/data${TESTDATA_ID}.out``.
+``${TESTDATA_ID}`` are IDs of testdata used in the test. The judge will access testdata by opening ``${RES_PATH}/testdata/${TESTDATA_ID}.in`` and ``${RES_PATH}/testdata/${TESTDATA_ID}.out``.
 
 The directory structure of ``${RES_PATH}``.
 
