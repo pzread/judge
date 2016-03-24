@@ -18,7 +18,7 @@ Challenge Request JSON Format
         "chal_id": ${CHALLENGE_ID},
         "code_path": ${CODE_PATH},
         "res_path": ${RES_PATH},
-        "comp_type": "c++"|"clang++"|"makefile"|"python3",
+        "comp_type": "g++"|"clang++"|"makefile"|"python3",
         "check_type": "diff"|"ioredir",
         "metadata": ${CHALMETA},
         "test": [${TEST},...]
