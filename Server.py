@@ -116,7 +116,7 @@ class JudgeHandler(WebSocketHandler):
                 'result': result,
             }))
 
-        except Exception as err:
+        except Exception:
             traceback.print_exception(*sys.exc_info())
             websk.write_message(json.dumps({
                 'chal_id': chal_id,
