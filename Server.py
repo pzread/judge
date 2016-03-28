@@ -4,7 +4,9 @@ Handle and response challenge requests from the frontend server.
 
 '''
 
+import sys
 import json
+import traceback
 from collections import deque
 from tornado import gen
 from tornado.ioloop import IOLoop, PollIOLoop
@@ -53,6 +55,8 @@ class JudgeHandler(WebSocketHandler):
 
         '''
 
+        # The worst exception, there is no chal_id in the obj.
+        chal_id = None
         try:
             chal_id = obj['chal_id']
             code_path = obj['code_path']
@@ -112,6 +116,14 @@ class JudgeHandler(WebSocketHandler):
                 'result': result,
             }))
 
+        except Exception as err:
+            traceback.print_exception(*sys.exc_info())
+            websk.write_message(json.dumps({
+                'chal_id': chal_id,
+                'verdict': None,
+                'result': None,
+            }))
+
         finally:
             JudgeHandler.chal_running_count -= 1
             JudgeHandler.emit_chal()
@@ -155,6 +167,15 @@ class JudgeHandler(WebSocketHandler):
         print('Frontend disconnected')
 
 
+def init_websocket_server():
+    '''Initialize websocket server.'''
+
+    app = Application([
+        (r'/judge', JudgeHandler),
+    ])
+    app.listen(2501)
+
+
 def main():
     '''Main function.'''
 
@@ -163,10 +184,7 @@ def main():
     StdChal.init()
     IOLoop.configure(EvIOLoop)
 
-    app = Application([
-        (r'/judge', JudgeHandler),
-    ])
-    app.listen(2501)
+    init_websocket_server()
 
     IOLoop.instance().start()
 
