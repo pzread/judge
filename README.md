@@ -1,10 +1,10 @@
 Judge - HypeX
 ============
 
-![docs badge](https://readthedocs.org/projects/judge-hypex/badge/?version=latest)
-![build badge](https://travis-ci.org/pzread/judge.svg?branch=master)
+![docs badge](https://readthedocs.org/projects/pip/badge/?version=stable)
+![build badge](https://travis-ci.org/pzread/judge.svg?branch=release)
 
-Read the document: http://judge-hypex.readthedocs.org/en/latest/
+Read the document: http://judge-hypex.readthedocs.org/en/stable/
 
 Travis CI: https://travis-ci.org/pzread/judge
 
