@@ -268,7 +268,7 @@ class StdChal:
                 judge_ioredir = IORedirJudge('container/standard', \
                     build_relpath)
                 if not (yield judge_ioredir.build(build_ugid, self.res_path)):
-                    return [(0, 0, STATUS_ERR)] * len(self.test_list)
+                    return [(0, 0, STATUS_ERR)] * len(self.test_list), ''
                 FileUtils.setperm(build_path, \
                     Privilege.JUDGE_UID, cache_gid, umask=0o750)
                 with StackContext(Privilege.fullaccess):
@@ -822,6 +822,10 @@ class IORedirJudge:
             if not os.path.isfile(self.build_path + '/build'):
                 callback(True)
                 return
+        
+        # Make the build file executable.
+        with StackContext(Privilege.fullaccess):
+            os.chmod(self.build_path + '/build', mode=0o770)
 
         # Build.
         task_id = PyExt.create_task(self.build_relpath + '/build', \
