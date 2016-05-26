@@ -8,9 +8,9 @@ import sys
 import json
 import traceback
 from collections import deque
-from tornado import gen
+from tornado import gen, concurrent
 from tornado.ioloop import IOLoop, PollIOLoop
-from tornado.web import Application
+from tornado.web import Application, RequestHandler
 from tornado.websocket import WebSocketHandler
 import PyExt
 import Privilege
@@ -27,8 +27,8 @@ class EvIOLoop(PollIOLoop):
         super().initialize(impl=PyExt.EvPoll(), **kwargs)
 
 
-class JudgeHandler(WebSocketHandler):
-    '''Judge request handler.
+class JudgeDispatcher:
+    '''Judge request dispatcher.
 
     Static attributes:
         chal_running_count (int): Number of current running challenges.
@@ -41,14 +41,14 @@ class JudgeHandler(WebSocketHandler):
 
     @staticmethod
     @gen.coroutine
-    def start_chal(obj, websk):
+    def start_chal(obj, callback):
         '''Start a challenge.
 
         Check the challenge config, issue judge tasks, then report the result.
 
         Args:
             obj (dict): Challenge config.
-            websk (WebSocketHandler): Websocket object.
+            callback: Challenge callback.
 
         Returns:
             None
@@ -110,31 +110,31 @@ class JudgeHandler(WebSocketHandler):
                     'verdict': ''
                 })
 
-            websk.write_message(json.dumps({
+            callback({
                 'chal_id': chal_id,
                 'verdict': verdict,
                 'result': result,
-            }))
+            })
 
         except Exception:
             traceback.print_exception(*sys.exc_info())
-            websk.write_message(json.dumps({
+            callback({
                 'chal_id': chal_id,
                 'verdict': None,
                 'result': None,
-            }))
+            })
 
         finally:
-            JudgeHandler.chal_running_count -= 1
-            JudgeHandler.emit_chal()
+            JudgeDispatcher.chal_running_count -= 1
+            JudgeDispatcher.emit_chal()
 
     @staticmethod
-    def emit_chal(obj=None, websk=None):
+    def emit_chal(obj=None, callback=None):
         '''Emit a challenge to the queue and trigger the start_chal.
 
         Args:
             obj (dict, optional): Challenge config.
-            websk (WebSocketHandler): Websocket object.
+            callback: Challange callback.
 
         Returns:
             None
@@ -142,13 +142,17 @@ class JudgeHandler(WebSocketHandler):
         '''
 
         if obj is not None:
-            JudgeHandler.chal_queue.append((obj, websk))
+            JudgeDispatcher.chal_queue.append((obj, callback))
 
-        while len(JudgeHandler.chal_queue) > 0 \
-            and JudgeHandler.chal_running_count < Config.TASK_MAXCONCURRENT:
-            chal = JudgeHandler.chal_queue.popleft()
-            JudgeHandler.chal_running_count += 1
-            IOLoop.instance().add_callback(JudgeHandler.start_chal, *chal)
+        while (len(JudgeDispatcher.chal_queue) > 0
+            and JudgeDispatcher.chal_running_count < Config.TASK_MAXCONCURRENT):
+            chal = JudgeDispatcher.chal_queue.popleft()
+            JudgeDispatcher.chal_running_count += 1
+            IOLoop.instance().add_callback(JudgeDispatcher.start_chal, *chal)
+
+
+class WebSocketClient(WebSocketHandler):
+    '''Websocket request handler.'''
 
     def open(self):
         '''Handle open event'''
@@ -159,7 +163,8 @@ class JudgeHandler(WebSocketHandler):
         '''Handle message event'''
 
         obj = json.loads(msg, 'utf-8')
-        JudgeHandler.emit_chal(obj, self)
+        JudgeDispatcher.emit_chal(obj,
+            lambda res: self.write_message(json.dumps(res)))
 
     def on_close(self):
         '''Handle close event'''
@@ -167,11 +172,27 @@ class JudgeHandler(WebSocketHandler):
         print('Frontend disconnected')
 
 
+class RequestClient(RequestHandler):
+    '''HTTP request handler.'''
+
+    @concurrent.return_future
+    def post(self, callback):
+        '''Handle POST request'''
+
+        def _chal_cb(res):
+            self.write(res)
+            callback()
+
+        obj = json.loads(self.request.body.decode('utf-8'))
+        JudgeDispatcher.emit_chal(obj, _chal_cb)
+
+
 def init_websocket_server():
     '''Initialize websocket server.'''
 
     app = Application([
-        (r'/judge', JudgeHandler),
+        (r'/judge', WebSocketClient),
+        (r'/reqjudge', RequestClient),
     ])
     app.listen(2501)
 

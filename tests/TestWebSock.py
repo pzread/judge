@@ -58,6 +58,7 @@ class WebSockCase(testing.AsyncTestCase):
         }))
         resp = yield conn.read_message()
         obj = json.loads(resp)
+        self.assertEqual(obj['chal_id'], 573)
         result_list = obj['result']
         self.assertEqual(len(result_list), 1)
         for result in result_list:
@@ -81,6 +82,7 @@ class WebSockCase(testing.AsyncTestCase):
         }))
         resp = yield conn.read_message()
         obj = json.loads(resp)
+        self.assertEqual(obj['chal_id'], 574)
         result_list = obj['result']
         self.assertEqual(result_list, None)
 
