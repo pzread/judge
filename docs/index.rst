@@ -85,7 +85,7 @@ For ``docker run``, you may need to expose ports to the host.
    git clone https://github.com/pzread/judge.git
    cd judge
    docker build -t judge .
-   docker run --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 Server.py'
+   docker run -p ${HOSTPORT}:2501 --privileged=true judge /bin/sh -c 'cd judge && ./setup.sh && python3 Server.py'
 
 
 Tables of contents
