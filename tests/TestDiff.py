@@ -35,11 +35,11 @@ class DiffJugeCase(testing.AsyncTestCase):
         '''Test g++, A + B problems.'''
 
         chal = StdChal(1, 'tests/testdata/test.cpp', 'g++', 'diff', \
-            'tests/testdata', \
+            'tests/testdata/res', \
             [
                 {
-                    'in': 'tests/testdata/0.in',
-                    'ans': 'tests/testdata/0.out',
+                    'in': 'tests/testdata/res/testdata/0.in',
+                    'ans': 'tests/testdata/res/testdata/0.out',
                     'timelimit': 10000,
                     'memlimit': 256 * 1024 * 1024,
                 }

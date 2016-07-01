@@ -1,4 +1,4 @@
-'''Websocket API unittest module.'''
+'''Request API unittest module.'''
 
 import json
 from tornado import testing, httpclient
@@ -18,8 +18,8 @@ class EvIOLoop(PollIOLoop):
         super().initialize(impl=PyExt.EvPoll(), **kwargs)
 
 
-class WebSockCase(testing.AsyncTestCase):
-    '''Run websocket API tests.'''
+class RequestCase(testing.AsyncTestCase):
+    '''Run request API tests.'''
 
     def __init__(self, *args):
         Privilege.init()
@@ -27,7 +27,7 @@ class WebSockCase(testing.AsyncTestCase):
         StdChal.init()
         IOLoop.configure(EvIOLoop)
 
-        Server.init_websocket_server()
+        Server.init_socket_server()
 
         super().__init__(*args)
 
@@ -45,7 +45,7 @@ class WebSockCase(testing.AsyncTestCase):
             body=json.dumps({
                 'chal_id': 573,
                 'code_path': 'tests/testdata/test.cpp',
-                'res_path': 'tests',
+                'res_path': 'tests/testdata/res',
                 'comp_type': 'g++',
                 'check_type': 'diff',
                 'metadata': {},
@@ -73,7 +73,7 @@ class WebSockCase(testing.AsyncTestCase):
             body=json.dumps({
                 'chal_id': 574,
                 'code_path': 'tests/testdata/testx.cpp',
-                'res_path': 'tests',
+                'res_path': 'tests/testdata/res',
                 'comp_type': 'g++',
                 'check_type': 'diff',
                 'metadata': {},

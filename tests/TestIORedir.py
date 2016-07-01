@@ -37,8 +37,8 @@ class IORedirJudgeCase(testing.AsyncTestCase):
         chal = StdChal(1, 'tests/testdata/test.cpp', 'g++', 'ioredir', \
             'tests/testdata/res', [
                 {
-                    'in': 'tests/testdata/0.in',
-                    'ans': 'tests/testdata/0.out',
+                    'in': 'tests/testdata/res/testdata/0.in',
+                    'ans': 'tests/testdata/res/testdata/0.out',
                     'timelimit': 10000,
                     'memlimit': 256 * 1024 * 1024,
                 }

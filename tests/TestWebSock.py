@@ -27,7 +27,7 @@ class WebSockCase(testing.AsyncTestCase):
         StdChal.init()
         IOLoop.configure(EvIOLoop)
 
-        Server.init_websocket_server()
+        Server.init_socket_server()
 
         super().__init__(*args)
 
@@ -43,7 +43,7 @@ class WebSockCase(testing.AsyncTestCase):
         conn.write_message(json.dumps({
             'chal_id': 573,
             'code_path': 'tests/testdata/test.cpp',
-            'res_path': 'tests',
+            'res_path': 'tests/testdata/res',
             'comp_type': 'g++',
             'check_type': 'diff',
             'metadata': {},
@@ -67,7 +67,7 @@ class WebSockCase(testing.AsyncTestCase):
         conn.write_message(json.dumps({
             'chal_id': 574,
             'code_path': 'tests/testdata/testx.cpp',
-            'res_path': 'tests',
+            'res_path': 'tests/testdata/res',
             'comp_type': 'g++',
             'check_type': 'diff',
             'metadata': {},

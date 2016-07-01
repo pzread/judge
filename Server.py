@@ -187,8 +187,8 @@ class RequestClient(RequestHandler):
         JudgeDispatcher.emit_chal(obj, _chal_cb)
 
 
-def init_websocket_server():
-    '''Initialize websocket server.'''
+def init_socket_server():
+    '''Initialize socket server.'''
 
     app = Application([
         (r'/judge', WebSocketClient),
@@ -205,7 +205,7 @@ def main():
     StdChal.init()
     IOLoop.configure(EvIOLoop)
 
-    init_websocket_server()
+    init_socket_server()
 
     IOLoop.instance().start()
 
