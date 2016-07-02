@@ -300,7 +300,7 @@ class StdChal:
                 ret, verdict = yield self.comp_python()
 
             if ret != PyExt.DETECT_NONE:
-                return [(0, 0, STATUS_CE)] * len(self.test_list), verdict
+                return [(0, 0, STATUS_CE, verdict)] * len(self.test_list)
             print('StdChal %d compiled'%self.chal_id)
 
             # Prepare test arguments
@@ -341,7 +341,7 @@ class StdChal:
             test_result = yield gen.multi(test_future)
             ret_result = list()
             for result in test_result:
-                test_pass, data = result
+                test_pass, data, verdict = result
                 runtime, peakmem, error = data
                 status = STATUS_ERR
                 if error == PyExt.DETECT_NONE:
@@ -358,9 +358,9 @@ class StdChal:
                     status = STATUS_RE
                 else:
                     status = STATUS_ERR
-                ret_result.append((runtime, peakmem, status))
+                ret_result.append((runtime, peakmem, status, verdict))
 
-            return ret_result, ''
+            return ret_result
 
         finally:
             if cache_hash is not None:
@@ -662,7 +662,7 @@ class StdChal:
 
             result_stat = (stat['utime'], stat['peakmem'], stat['detect_error'])
             if result_pass is not None:
-                callback((result_pass, result_stat))
+                callback((result_pass, result_stat, ''))
 
         def _diff_out(evfd, events):
             '''Diff the output of the task.
@@ -926,9 +926,14 @@ class IORedirJudge:
 
             nonlocal result_stat
             nonlocal result_pass
+            nonlocal verdict_path
 
             if result_pass is not None and result_stat is not None:
-                callback((result_pass, result_stat))
+                with StackContext(Privilege.fileaccess):
+                    verfile = open(verdict_path, 'r')
+                    verdict = verfile.read(140)
+                    verfile.close()
+                callback((result_pass, result_stat, verdict))
                 return
 
         def _check_done_cb(task_id, stat):
@@ -1006,8 +1011,8 @@ class IORedirJudge:
                 ansfile_fd = None
             outfile_fd = os.open(output_path, \
                 os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400)
-            os.close(os.open(verdict_path, \
-                os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400))
+            os.close(os.open(verdict_path,
+                os.O_CREAT | os.O_CLOEXEC, mode=0o640))
         with StackContext(Privilege.fullaccess):
             os.chown(output_path, check_uid, check_gid)
             os.chown(verdict_path, check_uid, check_gid)

@@ -85,7 +85,7 @@ class JudgeDispatcher:
 
             chal = StdChal(chal_id, code_path, comp_type, check_type, \
                 res_path, test_paramlist, metadata)
-            result_list, verdict = yield chal.start()
+            result_list = yield chal.start()
 
             result = []
             idx = 0
@@ -95,11 +95,13 @@ class JudgeDispatcher:
                 total_runtime = 0
                 total_mem = 0
                 total_status = 0
+                subverdicts = list()
                 for data_id in data_ids:
-                    runtime, peakmem, status = result_list[idx]
+                    runtime, peakmem, status, subverdict = result_list[idx]
                     total_runtime += runtime
                     total_mem += peakmem
                     total_status = max(total_status, status)
+                    subverdicts.append(subverdict)
                     idx += 1
 
                 result.append({
@@ -107,12 +109,11 @@ class JudgeDispatcher:
                     'state': total_status,
                     'runtime': total_runtime,
                     'peakmem': total_mem,
-                    'verdict': ''
+                    'verdict': subverdicts,
                 })
 
             callback({
                 'chal_id': chal_id,
-                'verdict': verdict,
                 'result': result,
             })
 
