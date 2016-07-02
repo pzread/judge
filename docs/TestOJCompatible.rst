@@ -36,12 +36,8 @@ Challenge Response JSON Format
     ${CHALRESP}
     {
         "chal_id": ${CHALLENGE_ID},
-        "verdict": ${VERDICT},
         "result": [${RESULT},...]
     }
-
-
-The compile error message will be stored at ``verdict``.
 
 
 Test JSON Format
@@ -72,10 +68,11 @@ Result JSON Format
         "state": ${STATE},
         "runtime": ${RUNTIME},
         "peakmem": ${PEAKMEM},
-        "verdict": ${VERDICT}
+        "verdict": [${VERDICT},...]
     }
 
 
+The compile error message and additional information will be stored at ``verdict``.
 The ``runtime`` is the overall ``user time`` of all runs. The ``peakmem`` is the highest memory usage of all runs.
 
 
