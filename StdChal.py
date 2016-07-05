@@ -215,8 +215,6 @@ class StdChal:
         '''Prefetch files.'''
 
         path_set = set([self.code_path])
-        for test in self.test_list:
-            path_set.add(os.path.abspath(test['ans']))
         for root, _, files in os.walk(self.res_path):
             for filename in files:
                 path_set.add(os.path.abspath(os.path.join(root, filename)))
@@ -1002,12 +1000,12 @@ class IORedirJudge:
             try:
                 check_infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
                 test_infile_fd = os.open(in_path, os.O_RDONLY | os.O_CLOEXEC)
-            except FileNotFoundError:
+            except (FileNotFoundError, TypeError):
                 check_infile_fd = None
                 test_infile_fd = None
             try:
                 ansfile_fd = os.open(ans_path, os.O_RDONLY | os.O_CLOEXEC)
-            except FileNotFoundError:
+            except (FileNotFoundError, TypeError):
                 ansfile_fd = None
             outfile_fd = os.open(output_path, \
                 os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o400)

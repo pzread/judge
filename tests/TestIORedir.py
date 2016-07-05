@@ -92,3 +92,31 @@ class IORedirJudgeCase(testing.AsyncTestCase):
         _, _, status, verdict = result_list[0]
         self.assertEqual(status, STATUS_WA)
         self.assertEqual(verdict, 'Diff\n12\n\n7\n\n')
+
+        chal = StdChal(3, 'tests/testdata/res_act/test.cpp', 'g++', 'ioredir', \
+            'tests/testdata/res_act', [
+                {
+                    'in': None,
+                    'ans': None,
+                    'timelimit': 10000,
+                    'memlimit': 256 * 1024 * 1024,
+                }
+            ], {
+                'redir_test': {
+                    "testin": -1,
+                    "testout": -1,
+                    "pipein": 0,
+                    "pipeout": 1,
+                },
+                'redir_check': {
+                    "testin": -1,
+                    "ansin": -1,
+                    "pipein": 1,
+                    "pipeout": 0,
+                }
+            } \
+        )
+        result_list = yield chal.start()
+        self.assertEqual(len(result_list), 1)
+        _, _, status, verdict = result_list[0]
+        self.assertEqual(status, STATUS_AC)
