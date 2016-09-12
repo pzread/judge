@@ -454,7 +454,7 @@ class StdChal:
 
         if task_id is None:
             os.close(errpipe_fd)
-            callback(PyExt.DETECT_INTERNALERR)
+            callback((PyExt.DETECT_INTERNALERR, ''))
             return
 
         PyExt.start_task(task_id, _done_cb, _started_cb)
@@ -511,7 +511,7 @@ class StdChal:
             PyExt.RESTRICT_LEVEL_LOW)
 
         if task_id is None:
-            callback(PyExt.DETECT_INTERNALERR)
+            callback((PyExt.DETECT_INTERNALERR, ''))
         else:
             PyExt.start_task(task_id, _done_cb)
 
@@ -596,7 +596,7 @@ class StdChal:
 
         if task_id is None:
             os.close(errpipe_fd)
-            callback(PyExt.DETECT_INTERNALERR)
+            callback((PyExt.DETECT_INTERNALERR, ''))
             return
 
         PyExt.start_task(task_id, _done_cb, _started_cb)
@@ -711,7 +711,7 @@ class StdChal:
                 ansfile.close()
 
                 if result_stat is not None:
-                    callback((result_pass, result_stat))
+                    callback((result_pass, result_stat, ''))
 
         judge_uid, judge_gid = StdChal.get_restrict_ugid()
 
@@ -1064,7 +1064,7 @@ class IORedirJudge:
             PyExt.RESTRICT_LEVEL_LOW)
 
         if check_task_id is None:
-            callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
+            callback((False, (0, 0, PyExt.DETECT_INTERNALERR), ''))
             return
         PyExt.start_task(check_task_id, _check_done_cb, _check_started_cb)
 
