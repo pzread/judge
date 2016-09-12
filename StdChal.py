@@ -749,7 +749,7 @@ class StdChal:
             os.close(outpipe_fd[0])
             os.close(outpipe_fd[1])
             ansfile.close()
-            callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
+            callback((False, (0, 0, PyExt.DETECT_INTERNALERR), ''))
         else:
             PyExt.start_task(task_id, _done_cb, _started_cb)
 
@@ -1075,6 +1075,6 @@ class IORedirJudge:
             PyExt.RESTRICT_LEVEL_HIGH)
 
         if test_task_id is None:
-            callback((False, (0, 0, PyExt.DETECT_INTERNALERR)))
+            callback((False, (0, 0, PyExt.DETECT_INTERNALERR), ''))
             return
         PyExt.start_task(test_task_id, _test_done_cb, _test_started_cb)
