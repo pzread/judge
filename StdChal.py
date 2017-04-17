@@ -411,8 +411,10 @@ class StdChal:
             nonlocal compile_path
 
             with StackContext(Privilege.fileaccess):
-                verfile = open(compile_path + '/verdict.txt', 'r')
-                verdict = verfile.read(140)
+                verfile = open(compile_path + '/verdict.txt', 'rb')
+                # To fix decoding error.
+                # Force convert the binary string to string temporarily.
+                verdict = ''.join(chr(c) for c in verfile.read(140))
                 verfile.close()
             callback((stat['detect_error'], verdict))
 
@@ -559,8 +561,10 @@ class StdChal:
             nonlocal compile_path
 
             with StackContext(Privilege.fileaccess):
-                verfile = open(compile_path + '/verdict.txt', 'r')
-                verdict = verfile.read(140)
+                verfile = open(compile_path + '/verdict.txt', 'rb')
+                # To fix decoding error.
+                # Force convert the binary string to string temporarily.
+                verdict = ''.join(chr(c) for c in verfile.read(140))
                 verfile.close()
             callback((stat['detect_error'], verdict))
 
