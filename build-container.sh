@@ -16,13 +16,11 @@ cp -a /usr/bin/clang++ $1/usr/bin/clang++
 cp /usr/bin/as $1/usr/bin/as
 cp /usr/bin/ld $1/usr/bin/ld
 cp /usr/bin/make $1/usr/bin/make
-cp /usr/bin/python3.4 $1/usr/bin/python3.4
-cp /usr/lib/libopcodes-2.25.1-system.so $1/usr/lib/libopcodes-2.25.1-system.so
-cp /usr/lib/libbfd-2.25.1-system.so $1/usr/lib/libbfd-2.25.1-system.so
+cp /usr/bin/python3.5 $1/usr/bin/python3.5
 cp -a /usr/lib/x86_64-linux-gnu $1/usr/lib/x86_64-linux-gnu
 cp -a /usr/lib/gcc $1/usr/lib/gcc
-cp -a /usr/lib/llvm-3.6 $1/usr/lib/llvm-3.6
-cp -a /usr/lib/python3.4 $1/usr/lib/python3.4
+cp -a /usr/lib/llvm-3.8 $1/usr/lib/llvm-3.8
+cp -a /usr/lib/python3.5 $1/usr/lib/python3.5
 cp -a /usr/lib/locale $1/usr/lib/locale
 cp -a /usr/include $1/usr/include
 cp -a /lib/x86_64-linux-gnu $1/lib/x86_64-linux-gnu

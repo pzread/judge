@@ -305,7 +305,7 @@ class StdChal:
             if self.comp_typ == 'python3':
                 exefile_path = self.chal_path \
                     + '/compile/__pycache__/test.cpython-34.pyc'
-                exe_path = '/usr/bin/python3.4'
+                exe_path = '/usr/bin/python3.5'
                 argv = ['./a.out']
                 envp = ['HOME=/', 'LANG=en_US.UTF-8']
 
@@ -579,7 +579,7 @@ class StdChal:
             errpipe_fd = os.open(compile_path + '/verdict.txt', \
                 os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, mode=0o440)
 
-        task_id = PyExt.create_task('/usr/bin/python3.4', \
+        task_id = PyExt.create_task('/usr/bin/python3.5', \
             [
                 '-m',
                 'py_compile',
