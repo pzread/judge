@@ -14,11 +14,11 @@ It requires root permission to run. The host must have the full ``Linux namespac
 Requirements
 ------------
 
-- python3 >= 3.4
+- python3 >= 3.6
 - python3-pip
-- gcc >= 5
-- g++ >= 5
-- clang >= 3.6
+- gcc >= 7.4
+- g++ >= 7.4
+- clang >= 6.0
 - cmake >= 2.8
 - libcgroup-dev >= 0.41
 - acl
@@ -27,7 +27,7 @@ Requirements
 Installation
 ------------
 
-build-container.sh is used to copy files from the host to create the container. Currently, it is designed for ``Ubuntu 15.10 x86_64``. You may need to modify it to fit your host's file system. Or you can install it in the docker (see `Use Docker`_).
+build-container.sh is used to copy files from the host to create the container. Currently, it is designed for ``Ubuntu 18.04 x86_64``. You may need to modify it to fit your host's file system. Or you can install it in the docker (see `Use Docker`_).
 
 .. code::
    

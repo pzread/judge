@@ -478,6 +478,9 @@ void Sandbox::update_state(siginfo_t *siginfo) {
             terminate();
             ptrace(PTRACE_CONT, child_pid, NULL, NULL);
 
+	} else if (siginfo->si_status == SIGSEGV) {
+            terminate();
+
         } else {
             // Passthrough other signals.
             ptrace(PTRACE_CONT, child_pid, NULL, siginfo->si_status);
