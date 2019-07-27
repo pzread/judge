@@ -1,9 +1,9 @@
-FROM ubuntu:16.04
+FROM ubuntu:18.04
 ARG TRAVIS_COMMIT
 ENV TRAVIS_COMMIT $TRAVIS_COMMIT
 
 RUN apt-get update && apt-get install -y \
-    python3.5 \
+    python3.6 \
     python3-pip \
     clang \
     gcc \
