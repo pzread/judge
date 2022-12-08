@@ -4,7 +4,7 @@ astroid==2.2.5
 Babel==2.7.0
 backports-abc==0.5
 breathe==4.13.0.post0
-certifi==2019.6.16
+certifi==2022.12.7
 cffi==1.12.3
 chardet==3.0.4
 colorama==0.4.1
